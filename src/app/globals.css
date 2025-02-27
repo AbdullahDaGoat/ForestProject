@@ -19,3 +19,111 @@ body {
   background: var(--background);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Custom popup styles */
+.leaflet-popup-content-wrapper {
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.leaflet-popup-content {
+  margin: 12px;
+  min-width: 200px;
+}
+
+/* Pulsing animation for user location */
+@keyframes pulse {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7);
+  }
+  
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 10px rgba(59, 130, 246, 0);
+  }
+  
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+  }
+}
+
+.animate-pulse {
+  animation: pulse 2s infinite;
+}
+
+/* Custom scrollbar for the sidebar */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* Add transitions for smoother interactions */
+.transition {
+  transition: all 0.2s ease-in-out;
+}
+
+/* Better contrast for danger levels */
+.bg-extreme {
+  background-color: #dc2626;
+}
+
+.bg-high {
+  background-color: #ea580c;
+}
+
+.bg-medium {
+  background-color: #eab308;
+}
+
+.bg-low {
+  background-color: #65a30d;
+}
+
+/* Weather indicators */
+.weather-indicator {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  background-color: rgba(0, 0, 0, 0.05);
+  border-radius: 16px;
+  margin-right: 8px;
+  font-size: 0.875rem;
+}
+
+.weather-indicator svg {
+  margin-right: 4px;
+}
+
+/* Custom scrollbar for WebKit browsers */
+::-webkit-scrollbar {
+  width: 8px; /* Thin scrollbar */
+}
+
+::-webkit-scrollbar-track {
+  background: #1a1d2a; /* Dark background matching sidebar */
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3a3f58; /* Soft grey-blue scrollbar */
+  border-radius: 10px;
+  transition: background 0.3s ease-in-out;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #5a5f7a; /* Lighter on hover */
+}

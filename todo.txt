@@ -1,0 +1,13 @@
+URGENT: Hydration Isses
+URGENT: Leaflet Pos issues
+
+WildFire Banner thingy goes away after clicking dangermap elements (i think it should remain)
+Missing Map on Phone like the map isnt visible only the data rn weird (Take screenshot)
+mobile compativility for PWA
+
+if new tmeperature is rpeorted for same location update current dont add a new one (but if location is different then ofc thats a new case)
+Avg Temp and High risk zones update
+Click on a fire area view details button doesnt work
+Your lcoation should give long and latitude 
+if the drone’s last recorded location is within 5km of its first location, it simply updates the existing data, but if it moves beyond 5km, it creates a new blocked region.
+All zones doesnt work (like in updating how many there are and an accordigon to collapse them and onload they overlfow and become hidden but once u click location then they adjust to view weird bug)
