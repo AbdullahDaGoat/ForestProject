@@ -1,10 +1,11 @@
 // src/app/inputData/route.ts
 import { NextResponse } from 'next/server';
 import { assessDangerLevel, EnvironmentalData } from '@/lib/dangerLevels';
+import { calculateDistance } from '@/lib/utils';
 
 interface DangerZone {
   temperature: number;
-  airQuality?: number;
+  airQuality: number | "N/A";
   location: {
     lat: number;
     lng: number;
@@ -57,7 +58,7 @@ export async function GET(request: Request) {
     });
   }
 
-  // Read the query params (?Temperature=...&AirQuality=...&Lat=...&Long=...)
+  // Read the query params (?Temperature=...&AirQuality=...&LocationLat=...&LocationLong=...)
   const Temperature = url.searchParams.get('Temperature');
   const AirQuality = url.searchParams.get('AirQuality');
   const LocationLat = url.searchParams.get('LocationLat');
@@ -67,52 +68,67 @@ export async function GET(request: Request) {
     return NextResponse.json({ dangerZones });
   }
 
-  // If the request has those query params, treat it like environmental data input
-  if (Temperature && LocationLat && LocationLong) {
-    try {
-      // Parse the values
-      const environmentalData: EnvironmentalData = {
-        temperature: parseFloat(Temperature),
-        airQuality: AirQuality ? parseFloat(AirQuality) : undefined,
-        location: {
-          lat: parseFloat(LocationLat),
-          lng: parseFloat(LocationLong),
-        },
+  try {
+    // Parse the values
+    const environmentalData: EnvironmentalData = {
+      temperature: parseFloat(Temperature),
+      airQuality: AirQuality ? parseFloat(AirQuality) : undefined,
+      location: {
+        lat: parseFloat(LocationLat),
+        lng: parseFloat(LocationLong),
+      },
+    };
+
+    // Assess the danger level
+    const assessment = assessDangerLevel(environmentalData);
+
+    // Check if there's an existing danger zone within 5km of its starting location
+    const existingIndex = dangerZones.findIndex(zone => {
+      const dist = calculateDistance(
+        zone.location.lat,
+        zone.location.lng,
+        environmentalData.location.lat,
+        environmentalData.location.lng
+      );
+      return dist < 5;
+    });
+
+    if (existingIndex !== -1) {
+      // Update the existing danger zone.
+      // Note: We keep the original zone location.
+      dangerZones[existingIndex] = {
+        ...dangerZones[existingIndex],
+        temperature: environmentalData.temperature,
+        airQuality: environmentalData.airQuality !== undefined ? environmentalData.airQuality : "N/A",
+        dangerLevel: assessment.level,
+        dangerDescription: assessment.description,
+        timestamp: new Date().toISOString(),
       };
-
-      // Assess the danger level
-      const assessment = assessDangerLevel(environmentalData);
-
-      // Build the danger zone object
+      const updatedZone = dangerZones[existingIndex];
+      notifySubscribers();
+      return NextResponse.json({ success: true, data: updatedZone });
+    } else {
+      // Create a new danger zone
       const newDangerZone: DangerZone = {
-        ...environmentalData,
+        temperature: environmentalData.temperature,
+        airQuality: environmentalData.airQuality !== undefined ? environmentalData.airQuality : "N/A",
+        location: environmentalData.location,
         dangerLevel: assessment.level,
         dangerDescription: assessment.description,
         timestamp: new Date().toISOString(),
       };
 
-      // Add to in-memory array
-      dangerZones.push(newDangerZone);
-
-      // Keep only the last 50 entries
+      // Add the new zone to the beginning of the array
+      dangerZones = [newDangerZone, ...dangerZones];
+      // Ensure we keep only the latest 50 entries
       if (dangerZones.length > 50) {
-        dangerZones = dangerZones.slice(-50);
+        dangerZones = dangerZones.slice(0, 50);
       }
-
-      // Notify all subscribers about the new data
       notifySubscribers();
-
-      // Return success response
-      return NextResponse.json({ 
-        success: true, 
-        data: newDangerZone 
-      });
-    } catch (error) {
-      console.error('Error processing environmental data:', error);
-      return NextResponse.json({ error: 'Failed to process data' }, { status: 500 });
+      return NextResponse.json({ success: true, data: newDangerZone });
     }
+  } catch (error) {
+    console.error('Error processing environmental data:', error);
+    return NextResponse.json({ error: 'Failed to process data' }, { status: 500 });
   }
-
-  // If no query params, just return the full list of current danger zones
-  return NextResponse.json({ dangerZones });
 }

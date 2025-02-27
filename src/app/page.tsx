@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
@@ -13,10 +12,15 @@ const DangerMap = dynamic(() => import('@/components/DangerMap'), { ssr: false }
 export default function Home() {
   const [stats, setStats] = useState({
     activeFireCount: 0,
-    highRiskZones: 0,
     averageTemperature: 0,
     lastUpdate: ''
   });
+  
+  // Track if component has mounted
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('map');
@@ -39,17 +43,15 @@ export default function Home() {
           const data = JSON.parse(event.data);
           
           if (data.dangerZones) {
-            const highRiskCount = data.dangerZones.filter((zone: { dangerLevel: string; }) => 
-              zone.dangerLevel === 'high' || zone.dangerLevel === 'extreme'
-            ).length;
             
             const averageTemp = data.dangerZones.length > 0 
-              ? data.dangerZones.reduce((sum: any, zone: { temperature: any; }) => sum + zone.temperature, 0) / data.dangerZones.length 
+              ? data.dangerZones.reduce((sum: number, zone: { temperature: number; }) => sum + zone.temperature, 0) / data.dangerZones.length 
               : 0;
               
+            // Update state with dynamic timestamp.
+            // Since this runs in useEffect, it will only run on the client.
             setStats({
               activeFireCount: data.dangerZones.length,
-              highRiskZones: highRiskCount,
               averageTemperature: Math.round(averageTemp * 10) / 10,
               lastUpdate: new Date().toLocaleTimeString()
             });
@@ -89,7 +91,8 @@ export default function Home() {
           <div className="hidden md:flex items-center space-x-4">
             <span className="text-sm text-gray-600 dark:text-gray-300 flex items-center">
               <Clock size={16} className="mr-1" />
-              Last updated: {stats.lastUpdate || 'Loading...'}
+              {/* Render "Loading..." on first render to avoid SSR mismatch */}
+              Last updated: {mounted ? (stats.lastUpdate || 'Loading...') : 'Loading...'}
             </span>
             <Link
               href="/inputData"
@@ -122,10 +125,6 @@ export default function Home() {
                   <div className="text-2xl font-bold text-red-600 dark:text-red-500">{stats.activeFireCount}</div>
                 </div>
                 
-                <div className="p-3 rounded-lg bg-orange-50 dark:bg-orange-900/20 border border-orange-100 dark:border-orange-900">
-                  <div className="text-xs text-orange-600 dark:text-orange-400 font-medium">High Risk Zones</div>
-                  <div className="text-2xl font-bold text-orange-600 dark:text-orange-500">{stats.highRiskZones}</div>
-                </div>
                 
                 <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900">
                   <div className="text-xs text-blue-600 dark:text-blue-400 font-medium">Avg Temperature</div>
@@ -134,17 +133,13 @@ export default function Home() {
               </div>
             </div>
             
-            {/* Push Notifications */}
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4">
-              <PushNotificationSetup />
-            </div>
           </div>
         </aside>
         
         {/* Mobile Sidebar */}
         {mobileSidebarOpen && (
           <div className="md:hidden fixed inset-0 z-50 bg-gray-900/80 flex justify-end">
-            <div className="w-3/4 bg-white dark:bg-gray-800 h-full overflow-y-auto p-4">
+            <div className="w-3/4 bg-white dark:bg-gray-800 h-full p-4">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-lg font-semibold">ForestGuard Menu</h2>
                 <button onClick={() => setMobileSidebarOpen(false)}>
@@ -162,10 +157,6 @@ export default function Home() {
                       <div className="text-lg font-bold text-red-600 dark:text-red-500">{stats.activeFireCount}</div>
                     </div>
                     
-                    <div className="p-2 rounded-lg bg-orange-50 dark:bg-orange-900/20 border border-orange-100 dark:border-orange-900">
-                      <div className="text-xs text-orange-600 dark:text-orange-400">High Risk</div>
-                      <div className="text-lg font-bold text-orange-600 dark:text-orange-500">{stats.highRiskZones}</div>
-                    </div>
                     
                     <div className="p-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900">
                       <div className="text-xs text-blue-600 dark:text-blue-400">Avg Temp</div>
@@ -173,9 +164,7 @@ export default function Home() {
                     </div>
                   </div>
                 </div>
-                
-                <PushNotificationSetup />
-                
+                                
                 <div className="mt-4">
                   <Link
                     href="/inputData"
@@ -221,7 +210,7 @@ export default function Home() {
           
           {/* Map Tab */}
           {activeTab === 'map' && (
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-auto">
               <div className="relative">
                 <div className="h-[75vh] w-full">
                   <DangerMap />
@@ -253,14 +242,7 @@ export default function Home() {
                           <p className="text-gray-600 dark:text-gray-300 text-sm">Temperature above 60°C, signs of active fire, immediate evacuation required.</p>
                         </div>
                       </div>
-                      
-                      <div className="flex items-start">
-                        <div className="flex-shrink-0 w-5 h-5 rounded-full bg-orange-500 mt-0.5"></div>
-                        <div className="ml-3">
-                          <h5 className="font-medium text-orange-700 dark:text-orange-400">High Risk</h5>
-                          <p className="text-gray-600 dark:text-gray-300 text-sm">Temperature 45-60°C, extremely dry conditions, high probability of fire ignition.</p>
-                        </div>
-                      </div>
+                    
                       
                       <div className="flex items-start">
                         <div className="flex-shrink-0 w-5 h-5 rounded-full bg-yellow-500 mt-0.5"></div>
@@ -300,16 +282,12 @@ export default function Home() {
               </div>
             </div>
           )}
+          <br/>
+          <div className="mt-6">
+              <PushNotificationSetup />
+          </div>
         </main>
       </div>
-      
-      {/* Footer */}
-      <footer className="bg-white dark:bg-gray-800 shadow-inner py-4 mt-6">
-        <div className="container mx-auto px-4 text-center text-sm text-gray-600 dark:text-gray-400">
-          <p>ForestGuard - Real-time Environmental Monitoring System</p>
-          <p className="text-xs mt-1">Data updates automatically in real-time. Last update: {stats.lastUpdate || 'Loading...'}</p>
-        </div>
-      </footer>
     </div>
   );
 }

@@ -1,5 +1,8 @@
 import './globals.css';
 import type { Metadata } from 'next';
+// Import the client components
+import MediaSessionManager from '@/components/MediaSessionManager.client';
+import ServiceWorkerManagerClient from '@/components/ServiceWorkerManager.client';
 
 export const metadata: Metadata = {
   title: 'Environmental Monitoring Dashboard',
@@ -7,11 +10,7 @@ export const metadata: Metadata = {
   manifest: '/manifest.json',
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <head>
@@ -21,6 +20,8 @@ export default function RootLayout({
       </head>
       <body>
         {children}
+        <MediaSessionManager />
+        <ServiceWorkerManagerClient />
       </body>
     </html>
   );
