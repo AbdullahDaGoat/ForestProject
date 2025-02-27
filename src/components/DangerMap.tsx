@@ -1,7 +1,5 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unused-vars */
-'use client';
-
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useState, useMemo, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { calculateDistance, formatDangerLevel } from '@/lib/utils';
@@ -10,12 +8,9 @@ import {
   Navigation,
   Info,
   MapPin,
-  Thermometer,
-  Wind,
-  Droplets,
   Clock
 } from 'lucide-react';
-// Import notification helpers so they’re in scope
+// Import notification helpers so they're in scope
 import { canNotify, showNotification } from '@/lib/notifications';
 
 const MapComponents = dynamic(
@@ -67,42 +62,130 @@ export default function DangerMap() {
   const [filterLevel, setFilterLevel] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const reconnectAttemptsRef = useRef<number>(0);
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [usePolling, setUsePolling] = useState(false);
 
-  // Set up SSE for real-time danger zone updates
+  const dangerLevelColorMap: Record<string, string> = {
+    low: "bg-green-500",
+    medium: "bg-yellow-500",
+    high: "bg-orange-500",
+    extreme: "bg-red-600",
+    "no risk": "bg-blue-500" // or whatever color you prefer
+  };
+
+  // Function to fetch danger zones data
+  const fetchDangerZonesData = async () => {
+    try {
+      const response = await fetch('/inputData');
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+      const data = await response.json();
+      if (data.dangerZones) {
+        // Ensure each zone has a unique id
+        const zonesWithIds = data.dangerZones.map((zone: any, index: number) => ({
+          ...zone,
+          id: zone.id || `zone-${index}-${Date.now()}`
+        }));
+        setDangerZones(zonesWithIds);
+        setLastUpdated(new Date());
+        setLoading(false);
+      }
+    } catch (err) {
+      console.error('Failed to fetch danger zones data:', err);
+      setError('Failed to load data. Please check your connection and try again.');
+    }
+  };
+
+  // Set up data fetching mechanism (SSE or polling)
   useEffect(() => {
     const setupEventSource = () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-      }
-      const eventSource = new EventSource('/inputData?subscribe=true');
-      eventSourceRef.current = eventSource;
-      eventSource.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.dangerZones) {
-            // Ensure each zone has a unique id
-            const zonesWithIds = data.dangerZones.map((zone: any, index: number) => ({
-              ...zone,
-              id: zone.id || `zone-${index}-${Date.now()}`
-            }));
-            setDangerZones(zonesWithIds);
-            setLastUpdated(new Date());
-            setLoading(false);
-          }
-        } catch (err) {
-          console.error('Failed to parse SSE data', err);
+      try {
+        if (eventSourceRef.current) {
+          eventSourceRef.current.close();
         }
-      };
-      eventSource.onerror = (error) => {
-        console.error('SSE error:', error);
-        setTimeout(setupEventSource, 5000);
-      };
+        
+        const eventSource = new EventSource('/inputData?subscribe=true');
+        eventSourceRef.current = eventSource;
+        
+        eventSource.onopen = () => {
+          console.log('SSE connection established');
+          reconnectAttemptsRef.current = 0;
+          setUsePolling(false);
+          // Initial data fetch to avoid waiting for the first SSE message
+          fetchDangerZonesData();
+        };
+        
+        eventSource.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.dangerZones) {
+              // Ensure each zone has a unique id
+              const zonesWithIds = data.dangerZones.map((zone: any, index: number) => ({
+                ...zone,
+                id: zone.id || `zone-${index}-${Date.now()}`
+              }));
+              setDangerZones(zonesWithIds);
+              setLastUpdated(new Date());
+              setLoading(false);
+            }
+          } catch (err) {
+            console.error('Failed to parse SSE data', err);
+          }
+        };
+        
+        eventSource.onerror = (error) => {
+          console.error('SSE error:', error);
+          // Close the current connection
+          eventSource.close();
+          
+          // After a few attempts, fall back to polling
+          if (reconnectAttemptsRef.current >= 3) {
+            console.log('Falling back to polling after multiple SSE failures');
+            setUsePolling(true);
+            setupPolling();
+            return;
+          }
+          
+          // Exponential backoff for reconnection
+          const reconnectDelay = Math.min(2000 * Math.pow(1.5, reconnectAttemptsRef.current), 30000);
+          console.log(`Attempting to reconnect SSE in ${reconnectDelay/1000} seconds...`);
+          setTimeout(setupEventSource, reconnectDelay);
+          reconnectAttemptsRef.current++;
+        };
+      } catch (err) {
+        console.error('Error setting up EventSource:', err);
+        setUsePolling(true);
+        setupPolling();
+      }
     };
-    setupEventSource();
+
+    const setupPolling = () => {
+      console.log('Setting up polling for data updates');
+      // Clear any existing polling interval
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+      }
+      
+      // Initial fetch
+      fetchDangerZonesData();
+      
+      // Set up regular polling
+      pollingIntervalRef.current = setInterval(fetchDangerZonesData, 10000); // Poll every 10 seconds
+    };
+
+    // Start with SSE, fall back to polling if needed
+    if (!usePolling) {
+      setupEventSource();
+    } else {
+      setupPolling();
+    }
 
     // Get user location continuously using watchPosition
+    let watchId: number | null = null;
     if ('geolocation' in navigator) {
-      const watchId = navigator.geolocation.watchPosition(
+      watchId = navigator.geolocation.watchPosition(
         (position) => {
           const { latitude, longitude } = position.coords;
           setUserLocation([latitude, longitude]);
@@ -113,15 +196,21 @@ export default function DangerMap() {
         },
         { enableHighAccuracy: true }
       );
-      return () => navigator.geolocation.clearWatch(watchId);
     }
 
+    // Cleanup function
     return () => {
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
       }
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+      }
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+      }
     };
-  }, []);
+  }, [usePolling]);
 
   // Calculate nearest danger zone and display notifications
   useEffect(() => {
@@ -176,6 +265,11 @@ export default function DangerMap() {
     ? [dangerZones[0].location.lat, dangerZones[0].location.lng]
     : defaultCenter) as [number, number];
 
+  // Function to handle manual refresh
+  const handleManualRefresh = () => {
+    fetchDangerZonesData();
+  };
+
   if (error) {
     return (
       <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded shadow">
@@ -200,11 +294,22 @@ export default function DangerMap() {
     <div className="flex flex-col space-y-4">
       {/* Header */}
       <div className="bg-gradient-to-r from-amber-500 to-red-600 p-4 rounded-lg shadow-lg">
-        <h2 className="text-white text-2xl font-bold flex items-center">
-          <AlertTriangle className="mr-2" /> Wildfire Monitoring System
-        </h2>
+        <div className="flex justify-between items-center">
+          <h2 className="text-white text-2xl font-bold flex items-center">
+            <AlertTriangle className="mr-2" /> Wildfire Monitoring System
+          </h2>
+          {usePolling && (
+            <button 
+              onClick={handleManualRefresh}
+              className="bg-white bg-opacity-20 hover:bg-opacity-30 px-3 py-1 rounded-md text-white text-sm flex items-center transition"
+            >
+              <Clock className="w-4 h-4 mr-1" /> Refresh
+            </button>
+          )}
+        </div>
         <p className="text-white opacity-90">
           Real-time tracking and alerts for forest fires and danger zones
+          {usePolling && <span className="ml-2 text-xs bg-white bg-opacity-20 px-2 py-0.5 rounded">Polling Mode</span>}
         </p>
       </div>
 
@@ -238,12 +343,12 @@ export default function DangerMap() {
                 {nearestDangerZone?.distance.toFixed(1)} km away
               </div>
               <div className="text-sm text-black mt-1 flex items-center">
-                <span className={`w-3 h-3 rounded-full mr-1 ${
-                  nearestDangerZone?.zone.dangerLevel === "low" ? "bg-green-500" : 
-                  nearestDangerZone?.zone.dangerLevel === "medium" ? "bg-yellow-500" : 
-                  nearestDangerZone?.zone.dangerLevel === "high" ? "bg-orange-500" : 
-                  "bg-red-600"
-                }`}></span>
+              <span
+                className={`w-3 h-3 rounded-full mr-1 ${
+                  dangerLevelColorMap[nearestDangerZone?.zone.dangerLevel || "no risk"] || "bg-gray-500"
+                }`}
+              />
+
                 {formatDangerLevel(nearestDangerZone?.zone.dangerLevel || "")} severity
               </div>
             </div>
@@ -263,13 +368,14 @@ export default function DangerMap() {
             </h3>
             <div className="space-y-2">
               {[
-                { level: "low", colorClass: "bg-green-500" },
-                { level: "medium", colorClass: "bg-yellow-500" },
-                { level: "high", colorClass: "bg-orange-500" },
-                { level: "extreme", colorClass: "bg-red-600" }
-              ].map(({ level, colorClass }) => (
+                { level: null, label: "All Zones", colorClass: "bg-blue-500" },
+                { level: "low", label: "Low", colorClass: "bg-green-500" },
+                { level: "medium", label: "Medium", colorClass: "bg-yellow-500" },
+                { level: "high", label: "High", colorClass: "bg-orange-500" },
+                { level: "extreme", label: "Extreme", colorClass: "bg-red-600" }
+              ].map(({ level, label, colorClass }) => (
                 <button 
-                  key={level}
+                  key={level || "all"}
                   onClick={() => setFilterLevel(level)}
                   className={`w-full py-2 px-3 rounded-md flex items-center justify-between transition duration-200 ${
                     filterLevel === level ? "bg-blue-600 text-white shadow-md" : "bg-gray-100 hover:bg-gray-200 text-gray-700"
@@ -277,10 +383,12 @@ export default function DangerMap() {
                 >
                   <span className="flex items-center">
                     <span className={`w-3 h-3 rounded-full mr-2 ${colorClass}`}></span>
-                    {level.charAt(0).toUpperCase() + level.slice(1)}
+                    {label}
                   </span>
                   <span className="text-xs px-2 py-1 rounded-full bg-white bg-opacity-30">
-                    {dangerZones.filter(zone => zone.dangerLevel === level).length}
+                    {level === null 
+                      ? dangerZones.length 
+                      : dangerZones.filter(zone => zone.dangerLevel === level).length}
                   </span>
                 </button>
               ))}

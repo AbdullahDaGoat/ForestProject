@@ -120,12 +120,6 @@ export default function Home() {
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Status Overview</h2>
               
               <div className="grid gap-3">
-                <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800">
-                  <div className="text-xs text-red-600 dark:text-red-400 font-medium">Active Fires</div>
-                  <div className="text-2xl font-bold text-red-600 dark:text-red-500">{stats.activeFireCount}</div>
-                </div>
-                
-                
                 <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900">
                   <div className="text-xs text-blue-600 dark:text-blue-400 font-medium">Avg Temperature</div>
                   <div className="text-2xl font-bold text-blue-600 dark:text-blue-500">{stats.averageTemperature}°C</div>
@@ -151,13 +145,7 @@ export default function Home() {
                 <div className="bg-white dark:bg-gray-700 rounded-lg shadow-sm p-4 space-y-3">
                   <h3 className="text-md font-medium">Status Overview</h3>
                   
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="p-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800">
-                      <div className="text-xs text-red-600 dark:text-red-400">Fires</div>
-                      <div className="text-lg font-bold text-red-600 dark:text-red-500">{stats.activeFireCount}</div>
-                    </div>
-                    
-                    
+                  <div className="grid grid-cols-3 gap-2">  
                     <div className="p-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900">
                       <div className="text-xs text-blue-600 dark:text-blue-400">Avg Temp</div>
                       <div className="text-lg font-bold text-blue-600 dark:text-blue-500">{stats.averageTemperature}°C</div>

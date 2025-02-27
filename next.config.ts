@@ -1,6 +1,5 @@
 const nextConfig = {
   reactStrictMode: true,
-  swcMinify: true,
   // Handle PWA files copying
   async headers() {
     return [
