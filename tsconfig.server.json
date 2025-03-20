@@ -3,7 +3,7 @@
     "compilerOptions": {
       "module": "CommonJS",
       "moduleResolution": "node",
-      "outDir": "dist/server",
+      "outDir": "dist",
       "noEmit": false,
       "esModuleInterop": true
     },
