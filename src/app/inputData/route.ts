@@ -90,7 +90,6 @@ export async function GET(request: Request) {
     const envData: EnvironmentalData = {
       temperature: parseFloat(Temperature),
       airQuality: AirQuality ? parseFloat(AirQuality) : undefined,
-      // Add optional windSpeed, humidity if provided
       windSpeed: WindSpeed ? parseFloat(WindSpeed) : undefined,
       humidity: Humidity ? parseFloat(Humidity) : undefined,
       location: {
@@ -99,8 +98,8 @@ export async function GET(request: Request) {
       },
     };
 
-    // 4) Decide which method to use:
-    //    - If location is provided, do new location-based logic.
+    // 4) Decide method:
+    //    - If location is provided, do advanced location-based logic.
     //    - Otherwise, fallback to old threshold-based approach.
     let dangerLevelResult: DangerAssessment | undefined;
 
@@ -111,27 +110,28 @@ export async function GET(request: Request) {
       !isNaN(envData.location.lng);
 
     if (hasLocation) {
-      // Prefer the new location-based approach
-      const riskResult = getWildfireRisk(envData);
+      // New location-based approach
+      const riskResult = await getWildfireRisk(envData);
       dangerLevelResult = {
-        level: riskResult.riskLevel as any, // or cast to DangerLevel if desired
+        level: riskResult.riskLevel as any, // or cast to DangerLevel
         description: riskResult.riskExplanation,
       };
     } else {
-      // Fallback to old approach
+      // Fallback
       dangerLevelResult = assessDangerLevel(envData);
     }
 
     if (!dangerLevelResult) {
-      // If for some reason both fail, just return
-      return NextResponse.json({ error: 'Unable to calculate danger level.' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Unable to calculate danger level.' },
+        { status: 400 }
+      );
     }
 
     // 5) Construct a new or updated DangerZone
     const newRecord: DangerZone = {
       temperature: envData.temperature,
-      airQuality:
-        envData.airQuality !== undefined ? envData.airQuality : 'N/A',
+      airQuality: envData.airQuality !== undefined ? envData.airQuality : 'N/A',
       windSpeed: envData.windSpeed !== undefined ? envData.windSpeed : 'N/A',
       humidity: envData.humidity !== undefined ? envData.humidity : 'N/A',
       location: {
@@ -154,7 +154,7 @@ export async function GET(request: Request) {
       return dist < 5;
     });
 
-    // 7) Update if found; otherwise insert as a new record
+    // 7) Update if found; otherwise insert
     if (existingIndex !== -1) {
       const updatedZone: DangerZone = {
         ...dangerZones[existingIndex],
@@ -170,7 +170,6 @@ export async function GET(request: Request) {
       notifySubscribers();
       return NextResponse.json({ success: true, data: updatedZone });
     } else {
-      // Insert at the front, keep only 50
       dangerZones = [newRecord, ...dangerZones.slice(0, 49)];
       notifySubscribers();
       return NextResponse.json({ success: true, data: newRecord });
