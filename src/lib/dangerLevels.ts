@@ -253,8 +253,10 @@ export function loadHistoricalWildfireData(): void {
   }
 
   const files = [
-    'wildfire_data.json',   // first format
-    'wildfire_data_1.json', // second format (Year, Month, Day)
+    'wildfire_data_1_part1.json', // second format (Year, Month, Day)
+    'wildfire_data_1_part2.json',
+    'wildfire_data_part1.json',
+    'wildfire_data_part2.json',
     'wildfire_data_2.json', // second format as well
     // add more if needed
   ];
