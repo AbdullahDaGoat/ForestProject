@@ -1,8 +1,8 @@
 import './globals.css';
 import type { Metadata } from 'next';
 // Import the client components
-import MediaSessionManager from '@/components/MediaSessionManager.client';
-import ServiceWorkerManagerClient from '@/components/ServiceWorkerManager.client';
+import MediaSessionManager from '../components/MediaSessionManager.client';
+import ServiceWorkerManagerClient from '../components/ServiceWorkerManager.client';
 
 export const metadata: Metadata = {
   title: 'Environmental Monitoring Dashboard',

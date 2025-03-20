@@ -6,7 +6,7 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import webpush from 'web-push';
+import * as webpush from 'web-push'; // Change to use namespace import
 import next from 'next';
 import { assessDangerLevel } from '../lib/dangerLevels';
 
