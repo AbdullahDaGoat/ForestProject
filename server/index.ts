@@ -8,7 +8,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import * as webpush from 'web-push'; // Change to use namespace import
 import next from 'next';
-import { assessDangerLevel } from '../lib/dangerLevels';
+import { assessDangerLevel } from '../src/lib/dangerLevels';
 
 // 1) Configure Next.js
 const dev = process.env.NODE_ENV !== 'production';
