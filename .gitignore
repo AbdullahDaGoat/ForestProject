@@ -41,3 +41,4 @@ yarn-error.log*
 next-env.d.ts
 # Ignore all wildfire data JSON files
 src/lib/*.json
+main.py
