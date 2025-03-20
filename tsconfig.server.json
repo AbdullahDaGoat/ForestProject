@@ -7,5 +7,5 @@
     "noEmit": false,
     "esModuleInterop": true
   },
-  "include": ["server/**/*.ts"] // or wherever your server code lives
+  "include": ["server/**/*.ts"]
 }

@@ -1,4 +1,5 @@
 // server/index.ts
+/* eslint-disable @typescript-eslint/no-explicit-any */
 'use strict';
 
 import express, { Request, Response } from 'express';
@@ -7,7 +8,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import * as webpush from 'web-push'; // Change to use namespace import
 import next from 'next';
-// import { assessDangerLevel } from '../src/lib/dangerLevels';
+import { assessDangerLevel } from '@/lib/dangerLevels';
 
 // 1) Configure Next.js
 const dev = process.env.NODE_ENV !== 'production';
@@ -43,20 +44,20 @@ async function startServer() {
   );
 
   // 6) Define DangerZone type
-  // interface DangerZone {
-  //   temperature: number;
-  //   airQuality: number | "N/A";
-  //   location: {
-  //     lat: number;
-  //     lng: number;
-  //   };
-  //   dangerLevel: string;
-  //   dangerDescription: string;
-  //   timestamp: string;
-  // }
+  interface DangerZone {
+    temperature: number;
+    airQuality: number | "N/A";
+    location: {
+      lat: number;
+      lng: number;
+    };
+    dangerLevel: string;
+    dangerDescription: string;
+    timestamp: string;
+  }
 
   // In-memory storage
-  // let dangerZones: DangerZone[] = [];
+  let dangerZones: DangerZone[] = [];
   const subscriptions: PushSubscription[] = [];
 
   // 7) Middlewares
@@ -67,51 +68,51 @@ async function startServer() {
   // 8) Define your custom endpoints
 
   // Example: GET /inputData (like your existing route)
-  // app.get('/inputData', async (req: Request, res: Response): Promise<any> => {
-  //   try {
-  //     const { Temperature, AirQuality, LocationLat, LocationLong } = req.query;
+  app.get('/inputData', async (req: Request, res: Response): Promise<any> => {
+    try {
+      const { Temperature, AirQuality, LocationLat, LocationLong } = req.query;
 
-  //     if (!Temperature || !LocationLat || !LocationLong) {
-  //       return res.json({ dangerZones });
-  //     }
+      if (!Temperature || !LocationLat || !LocationLong) {
+        return res.json({ dangerZones });
+      }
 
-  //     // Parse inputs
-  //     const parsedTemperature = parseFloat(Temperature as string);
-  //     const parsedAirQuality = AirQuality ? parseFloat(AirQuality as string) : undefined;
-  //     const data = {
-  //       temperature: parsedTemperature,
-  //       airQuality: parsedAirQuality,
-  //       location: {
-  //         lat: parseFloat(LocationLat as string),
-  //         lng: parseFloat(LocationLong as string)
-  //       }
-  //     };
+      // Parse inputs
+      const parsedTemperature = parseFloat(Temperature as string);
+      const parsedAirQuality = AirQuality ? parseFloat(AirQuality as string) : undefined;
+      const data = {
+        temperature: parsedTemperature,
+        airQuality: parsedAirQuality,
+        location: {
+          lat: parseFloat(LocationLat as string),
+          lng: parseFloat(LocationLong as string)
+        }
+      };
 
-  //     // Assess danger level
-  //     const assessment = assessDangerLevel(data);
+      // Assess danger level
+      const assessment = assessDangerLevel(data);
 
-  //     // Create new danger zone
-  //     const newDangerZone: DangerZone = {
-  //       temperature: data.temperature,
-  //       airQuality: parsedAirQuality !== undefined ? parsedAirQuality : "N/A",
-  //       location: data.location,
-  //       dangerLevel: assessment.level,
-  //       dangerDescription: assessment.description,
-  //       timestamp: new Date().toISOString()
-  //     };
+      // Create new danger zone
+      const newDangerZone: DangerZone = {
+        temperature: data.temperature,
+        airQuality: parsedAirQuality !== undefined ? parsedAirQuality : "N/A",
+        location: data.location,
+        dangerLevel: assessment.level,
+        dangerDescription: assessment.description,
+        timestamp: new Date().toISOString()
+      };
 
-  //     // Store up to 50 records
-  //     dangerZones = [newDangerZone, ...dangerZones.slice(0, 49)];
+      // Store up to 50 records
+      dangerZones = [newDangerZone, ...dangerZones.slice(0, 49)];
 
-  //     // Emit event to all connected clients
-  //     io.emit('dangerZoneUpdate', newDangerZone);
+      // Emit event to all connected clients
+      io.emit('dangerZoneUpdate', newDangerZone);
 
-  //     return res.json({ success: true, data: newDangerZone });
-  //   } catch (error) {
-  //     console.error('Error processing data:', error);
-  //     return res.status(500).json({ error: 'Failed to process environmental data' });
-  //   }
-  // });
+      return res.json({ success: true, data: newDangerZone });
+    } catch (error) {
+      console.error('Error processing data:', error);
+      return res.status(500).json({ error: 'Failed to process environmental data' });
+    }
+  });
 
   // Endpoint to save push subscription
   app.post('/api/save-subscription', (req: Request, res: Response) => {
@@ -141,7 +142,7 @@ async function startServer() {
   io.on('connection', (socket) => {
     console.log("A client connected!");
     // Send initial data
-    // socket.emit("initialData", dangerZones);
+    socket.emit("initialData", dangerZones);
 
     socket.on("disconnect", () => {
       console.log("A client disconnected!");
