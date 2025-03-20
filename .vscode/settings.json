@@ -6,6 +6,5 @@
         "**/.DS_Store": true,
         "**/Thumbs.db": true,
         "": true,
-        "**/*.json": true
     }
 }
