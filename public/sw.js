@@ -1,8 +1,7 @@
 /**
  * Fully Refactored Service Worker for PWA functionality.
  * - Uses self.registration.showNotification() to display notifications.
- * - Instead of directly calling geolocation (which causes violations), it
- *   sends a message to the client requesting location data.
+ * - Instead of directly calling geolocation, it sends a message to the client requesting location data.
  * - Rewrites backend requests to your configured BACKEND_URL.
  */
 
@@ -22,6 +21,8 @@ const urlsToCache = [
   '/icons/icon-512x512.png'
 ];
 
+console.log('[SW] Service Worker script executing...');
+
 /**
  * Checks if a URL should be routed to the backend.
  */
@@ -31,6 +32,7 @@ function isBackendRequest(url) {
   const urlPath = urlObj.pathname;
   // Do not intercept SSE requests
   if (urlPath.startsWith('/inputData') && (urlObj.searchParams.has('subscribe') || url.includes('subscribe=true'))) {
+    console.log('[SW] Bypassing backend interception for SSE request:', url);
     return false;
   }
   return paths.some(path => urlPath.startsWith(path));
@@ -42,44 +44,67 @@ function isBackendRequest(url) {
 function rewriteUrlIfNeeded(url) {
   if (isBackendRequest(url)) {
     const urlObj = new URL(url);
-    return `${BACKEND_URL}${urlObj.pathname}${urlObj.search}`;
+    const rewrittenUrl = `${BACKEND_URL}${urlObj.pathname}${urlObj.search}`;
+    console.log('[SW] Rewriting URL:', url, 'to', rewrittenUrl);
+    return rewrittenUrl;
   }
   return url;
 }
 
 // INSTALL: Cache essential frontend assets.
 self.addEventListener('install', (event) => {
+  console.log('[SW] Install event triggered');
   self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(urlsToCache))
+    caches.open(CACHE_NAME).then((cache) => {
+      console.log('[SW] Caching essential assets:', urlsToCache);
+      return cache.addAll(urlsToCache);
+    }).then(() => {
+      console.log('[SW] Caching completed successfully');
+    }).catch(err => {
+      console.error('[SW] Error during caching assets:', err);
+    })
   );
 });
 
 // ACTIVATE: Clean up old caches and claim clients.
 self.addEventListener('activate', (event) => {
+  console.log('[SW] Activate event triggered');
   event.waitUntil(
     Promise.all([
-      caches.keys().then((cacheNames) =>
-        Promise.all(
+      caches.keys().then((cacheNames) => {
+        console.log('[SW] Found caches:', cacheNames);
+        return Promise.all(
           cacheNames.map((cacheName) => {
             if (cacheName !== CACHE_NAME) {
+              console.log('[SW] Deleting outdated cache:', cacheName);
               return caches.delete(cacheName);
             }
           })
-        )
-      ),
-      self.clients.claim()
-    ])
+        );
+      }),
+      self.clients.claim().then(() => {
+        console.log('[SW] Clients claimed');
+      })
+    ]).then(() => {
+      console.log('[SW] Activation completed successfully');
+    }).catch(err => {
+      console.error('[SW] Activation error:', err);
+    })
   );
 });
 
-// FETCH: For backend requests, rewrite URL; otherwise use cache-first.
+// FETCH: Handle requests by rewriting backend URLs or using cache-first strategy.
 self.addEventListener('fetch', (event) => {
   const requestUrl = event.request.url;
+  console.log('[SW] Fetch event for:', requestUrl);
+
   // Bypass SSE connections.
   if (requestUrl.includes('subscribe=true')) {
+    console.log('[SW] SSE connection detected. Bypassing fetch handler for:', requestUrl);
     return;
   }
+  
   if (isBackendRequest(requestUrl)) {
     const backendUrl = rewriteUrlIfNeeded(requestUrl);
     event.respondWith(
@@ -89,8 +114,11 @@ self.addEventListener('fetch', (event) => {
         body: event.request.method !== 'GET' ? event.request.clone().body : undefined,
         mode: 'cors',
         credentials: 'same-origin'
+      }).then(response => {
+        console.log('[SW] Fetched backend data successfully from:', backendUrl);
+        return response;
       }).catch((error) => {
-        console.error('Backend fetch failed:', error);
+        console.error('[SW] Backend fetch failed for:', backendUrl, 'Error:', error);
         // For POST requests, queue data for background sync.
         if (event.request.method === 'POST' && requestUrl.includes('/inputData')) {
           return event.request.clone().json().then((data) => {
@@ -113,21 +141,29 @@ self.addEventListener('fetch', (event) => {
     );
     return;
   }
+  
   // For other requests, use a cache-first strategy.
   event.respondWith(
     caches.match(event.request).then((response) => {
-      if (response) return response;
+      if (response) {
+        console.log('[SW] Serving from cache:', event.request.url);
+        return response;
+      }
+      console.log('[SW] Fetching from network:', event.request.url);
       return fetch(event.request).then((networkResponse) => {
         if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
+          console.log('[SW] Network response not cacheable for:', event.request.url);
           return networkResponse;
         }
         const responseToCache = networkResponse.clone();
         caches.open(CACHE_NAME).then((cache) => {
+          console.log('[SW] Caching new resource:', event.request.url);
           cache.put(event.request, responseToCache);
         });
         return networkResponse;
-      }).catch(() => {
-        // Optionally, you can return a fallback response.
+      }).catch((error) => {
+        console.error('[SW] Fetch error for:', event.request.url, 'Error:', error);
+        // Optionally, return a fallback response.
       });
     })
   );
@@ -139,19 +175,28 @@ function openDB(name, version, upgradeCallback) {
     const request = indexedDB.open(name, version);
     if (upgradeCallback) {
       request.onupgradeneeded = (event) => {
+        console.log('[SW] Upgrading IndexedDB:', name);
         upgradeCallback(event.target.result);
       };
     }
-    request.onsuccess = (event) => resolve(event.target.result);
-    request.onerror = (event) => reject(event.target.error);
+    request.onsuccess = (event) => {
+      console.log('[SW] IndexedDB opened successfully:', name);
+      resolve(event.target.result);
+    };
+    request.onerror = (event) => {
+      console.error('[SW] IndexedDB error:', event.target.error);
+      reject(event.target.error);
+    };
   });
 }
 
 // Queue data for background sync.
 async function queueDataForSync(data) {
+  console.log('[SW] Queueing data for background sync:', data);
   try {
     const db = await openDB('environmentalData', 1, (db) => {
       if (!db.objectStoreNames.contains('outbox')) {
+        console.log('[SW] Creating "outbox" object store in IndexedDB');
         db.createObjectStore('outbox', { keyPath: 'id', autoIncrement: true });
       }
     });
@@ -159,56 +204,61 @@ async function queueDataForSync(data) {
     const store = tx.objectStore('outbox');
     await store.add({ ...data, timestamp: new Date().toISOString() });
     await tx.complete;
+    console.log('[SW] Data queued successfully for background sync');
     return Promise.resolve();
   } catch (error) {
-    console.error('Failed to queue data for sync:', error);
+    console.error('[SW] Failed to queue data for sync:', error);
     throw error;
   }
 }
 
 // BACKGROUND SYNC: Process queued data when connectivity is restored.
 self.addEventListener('sync', (event) => {
+  console.log('[SW] Sync event received:', event.tag);
   if (event.tag === 'sync-environmental-data') {
     event.waitUntil(syncEnvironmentalData());
   }
 });
 
 async function syncEnvironmentalData() {
+  console.log('[SW] Starting environmental data sync');
   try {
     const db = await openDB('environmentalData', 1);
     const tx = db.transaction('outbox', 'readonly');
     const store = tx.objectStore('outbox');
     const offlineData = await store.getAll();
-    
     await tx.complete;
-    
+    console.log('[SW] Retrieved', offlineData.length, 'items from outbox');
+
     for (const data of offlineData) {
       try {
+        console.log('[SW] Syncing data for ID:', data.id);
         const response = await fetch(`${BACKEND_URL}/inputData`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data)
         });
-        
         if (response.ok) {
           const deleteTx = db.transaction('outbox', 'readwrite');
           const deleteStore = deleteTx.objectStore('outbox');
           await deleteStore.delete(data.id);
           await deleteTx.complete;
+          console.log('[SW] Synced and deleted queued data for ID:', data.id);
+        } else {
+          console.warn('[SW] Failed to sync data for ID:', data.id);
         }
       } catch (error) {
-        console.error('Failed to sync data:', error);
+        console.error('[SW] Error syncing data for ID:', data.id, 'Error:', error);
       }
     }
   } catch (error) {
-    console.error('Error accessing IndexedDB:', error);
+    console.error('[SW] Error accessing IndexedDB during sync:', error);
   }
 }
 
 // PUSH EVENT: Handle incoming push notifications.
 self.addEventListener('push', (event) => {
-  // Log received push event for debugging
-  console.log('Push event received', event);
+  console.log('[SW] Push event received:', event);
   
   // Create default notification data
   let notificationData = {
@@ -218,18 +268,17 @@ self.addEventListener('push', (event) => {
     badge: '/icons/icon-72x72.png',
     tag: 'environmental-alert',
     data: { url: '/' },
-    requireInteraction: true  // Important for mobile - keeps notification visible
+    requireInteraction: true  // Keeps notification visible on mobile
   };
   
   // Try to parse the payload
   if (event.data) {
     try {
       const data = event.data.json();
-      console.log('Push data received:', data);
+      console.log('[SW] Push payload parsed successfully:', data);
       notificationData = { ...notificationData, ...data };
     } catch (e) {
-      console.error('Error parsing push notification data:', e);
-      // Continue with default notification data
+      console.error('[SW] Error parsing push notification data:', e);
     }
   }
   
@@ -239,30 +288,24 @@ self.addEventListener('push', (event) => {
   } else if (notificationData.dangerLevel === 'medium') {
     notificationData.vibrate = [100, 50, 100];
   } else {
-    // Always include a default vibration pattern for mobile
     notificationData.vibrate = [100];
   }
   
-  // Ensure we have actions for mobile
+  // Ensure actions are present for mobile
   if (!notificationData.actions) {
     notificationData.actions = [
       { action: 'view', title: 'View Details' }
     ];
   }
   
-  // Check permission before showing notification
   event.waitUntil(
     self.registration.pushManager.permissionState({ userVisibleOnly: true })
       .then(permissionState => {
-        console.log('Push permission state:', permissionState);
-        
+        console.log('[SW] Push permission state:', permissionState);
         if (permissionState === 'granted') {
-          // Show notification with better error handling
           return self.registration.showNotification(notificationData.title, notificationData)
             .then(() => {
-              console.log('Notification shown successfully');
-              
-              // Notify clients that notification was shown successfully
+              console.log('[SW] Notification shown successfully:', notificationData.title);
               return self.clients.matchAll({ type: 'window' })
                 .then(clients => {
                   clients.forEach(client => {
@@ -274,8 +317,7 @@ self.addEventListener('push', (event) => {
                 });
             })
             .catch(err => {
-              console.error('Error showing notification:', err);
-              // Try a simpler notification as fallback for mobile
+              console.error('[SW] Error showing notification:', err);
               return self.registration.showNotification('Environmental Alert', {
                 body: 'New alert detected in your area.',
                 icon: '/icons/icon-192x192.png',
@@ -283,7 +325,7 @@ self.addEventListener('push', (event) => {
               });
             });
         } else {
-          console.warn('Push event received but notification permission not granted');
+          console.warn('[SW] Notification permission not granted');
           return Promise.resolve();
         }
       })
@@ -292,25 +334,23 @@ self.addEventListener('push', (event) => {
 
 // NOTIFICATION CLICK: Handle user clicks on notifications.
 self.addEventListener('notificationclick', (event) => {
-  console.log('Notification clicked:', event.notification.tag);
-  
-  // Close the notification
+  console.log('[SW] Notification clicked:', event.notification.tag);
   event.notification.close();
   
-  // Handle specific actions
   if (event.action === 'view') {
-    console.log('View action clicked');
+    console.log('[SW] "View" action clicked on notification:', event.notification.tag);
   }
   
-  // Focus or open window
   event.waitUntil(
     clients.matchAll({ type: 'window' }).then((clientList) => {
       for (const client of clientList) {
         if ('url' in client && client.url === (event.notification.data?.url || '/') && 'focus' in client) {
+          console.log('[SW] Focusing existing client for URL:', client.url);
           return client.focus();
         }
       }
       if (clients.openWindow) {
+        console.log('[SW] Opening new window for URL:', event.notification.data?.url || '/');
         return clients.openWindow(event.notification.data?.url || '/');
       }
     })
@@ -319,6 +359,7 @@ self.addEventListener('notificationclick', (event) => {
 
 // PERIODIC SYNC: Send a message to the client requesting location data.
 self.addEventListener('periodicsync', (event) => {
+  console.log('[SW] Periodic sync event received:', event.tag);
   if (event.tag === 'environmental-check') {
     event.waitUntil(performEnvironmentalCheck());
   }
@@ -328,30 +369,28 @@ async function performEnvironmentalCheck() {
   try {
     const allClients = await self.clients.matchAll();
     if (allClients.length > 0) {
-      // Send a message to the first client to request location.
+      console.log('[SW] Sending location request to client');
       allClients[0].postMessage({ type: 'REQUEST_LOCATION' });
-      console.log('Location request sent to client');
     } else {
-      console.log('No active clients found for location request');
+      console.log('[SW] No active clients found for location request');
     }
   } catch (error) {
-    console.error('Error performing background check:', error);
+    console.error('[SW] Error during periodic sync (environmental check):', error);
   }
 }
 
 // Listen for messages from clients.
 self.addEventListener('message', (event) => {
-  console.log('Message received in SW:', event.data?.type);
+  console.log('[SW] Message received:', event.data?.type);
   
   if (event.data && event.data.type === 'LOCATION_DATA') {
     const { latitude, longitude } = event.data;
+    console.log('[SW] Received location data:', latitude, longitude);
     checkDangerZones(latitude, longitude);
   }
   
-  // Handle subscription status updates
   if (event.data && event.data.type === 'SUBSCRIPTION_SUCCESSFUL') {
-    console.log('Subscription successful message received');
-    // Notify all clients about successful subscription
+    console.log('[SW] Subscription successful message received');
     self.clients.matchAll({ type: 'window' }).then(clients => {
       clients.forEach(client => {
         client.postMessage({
@@ -360,11 +399,6 @@ self.addEventListener('message', (event) => {
         });
       });
     });
-    
-    // For mobile devices, show an immediate test notification to verify functionality
-    // This helps ensure that:
-    // 1. The user sees that notifications are working
-    // 2. The system confirms the notification permission and subscription are active
     if (event.data.userAgent && /Mobi|Android/i.test(event.data.userAgent)) {
       self.registration.showNotification('Notifications Enabled', {
         body: 'You will now receive environmental alerts',
@@ -375,16 +409,15 @@ self.addEventListener('message', (event) => {
         requireInteraction: false,
         data: { url: '/' }
       }).then(() => {
-        console.log('Mobile test notification shown successfully');
+        console.log('[SW] Mobile test notification shown successfully for subscription confirmation');
       }).catch(err => {
-        console.error('Failed to show mobile test notification:', err);
+        console.error('[SW] Failed to show mobile test notification:', err);
       });
     }
   }
   
-  // Handle test notification requests
   if (event.data && event.data.type === 'TEST_NOTIFICATION') {
-    console.log('Test notification requested');
+    console.log('[SW] Test notification requested');
     self.registration.showNotification('Test Notification', {
       body: 'This is a test notification from your environmental monitoring app',
       icon: '/icons/icon-192x192.png',
@@ -397,14 +430,13 @@ self.addEventListener('message', (event) => {
         { action: 'view', title: 'View App' }
       ]
     }).then(() => {
-      // Notify the client that the notification was shown
       event.source.postMessage({
         type: 'NOTIFICATION_SHOWN',
         notificationId: 'test-notification'
       });
+      console.log('[SW] Test notification shown and client notified');
     }).catch(err => {
-      console.error('Error showing test notification:', err);
-      // Notify the client about the error
+      console.error('[SW] Error showing test notification:', err);
       event.source.postMessage({
         type: 'NOTIFICATION_ERROR',
         error: err.message || 'Unknown error'
@@ -412,10 +444,8 @@ self.addEventListener('message', (event) => {
     });
   }
   
-  // Handle subscription removal
   if (event.data && event.data.type === 'SUBSCRIPTION_REMOVED') {
-    console.log('Subscription removal message received');
-    // Notify all clients
+    console.log('[SW] Subscription removal message received');
     self.clients.matchAll({ type: 'window' }).then(clients => {
       clients.forEach(client => {
         client.postMessage({
@@ -429,17 +459,16 @@ self.addEventListener('message', (event) => {
 
 // Check danger zones given the user's location.
 async function checkDangerZones(latitude, longitude) {
+  console.log('[SW] Checking danger zones for location:', latitude, longitude);
   try {
-    console.log('Checking danger zones for:', latitude, longitude);
     const response = await fetch(`${BACKEND_URL}/inputData`);
     if (!response.ok) {
-      console.error('Failed to fetch danger zones data');
+      console.error('[SW] Failed to fetch danger zones data. Status:', response.status);
       return;
     }
-    
     const data = await response.json();
     const dangerZones = data.dangerZones || [];
-    console.log('Received danger zones:', dangerZones.length);
+    console.log('[SW] Received', dangerZones.length, 'danger zones');
     
     for (const zone of dangerZones) {
       const distance = calculateDistance(
@@ -448,7 +477,7 @@ async function checkDangerZones(latitude, longitude) {
         zone.location.lat,
         zone.location.lng
       );
-      console.log(`Distance to zone ${zone.id}: ${distance}km`);
+      console.log(`[SW] Distance to zone ${zone.id}: ${distance} km`);
       
       if (distance < 7) {
         const notificationTitle = distance < 5
@@ -456,7 +485,7 @@ async function checkDangerZones(latitude, longitude) {
           : '⚡ You are approaching a danger zone';
         const notificationBody = distance < 5
           ? `You are currently inside a ${zone.dangerLevel} risk area. Take necessary precautions.`
-          : `You are ${Math.round(distance - 5)}km from a ${zone.dangerLevel} risk area. Be alert.`;
+          : `You are ${Math.round(distance - 5)} km from a ${zone.dangerLevel} risk area. Be alert.`;
         
         try {
           await self.registration.showNotification(notificationTitle, {
@@ -471,15 +500,16 @@ async function checkDangerZones(latitude, longitude) {
               { action: 'view', title: 'View Details' }
             ]
           });
-          console.log('Proximity notification shown successfully');
+          console.log('[SW] Proximity notification shown successfully for zone:', zone.id);
         } catch (err) {
-          console.error('Error showing proximity notification:', err);
+          console.error('[SW] Error showing proximity notification for zone:', zone.id, 'Error:', err);
         }
+        // Only show one proximity notification per check.
         break;
       }
     }
   } catch (error) {
-    console.error('Error checking danger zones:', error);
+    console.error('[SW] Error checking danger zones:', error);
   }
 }
 
