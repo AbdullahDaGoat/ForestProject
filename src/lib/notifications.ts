@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
 type NotificationType = 'danger-zone' | 'approach-zone' | 'update' | 'info';
 
 export interface NotificationOptions {
@@ -40,8 +41,8 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
 
 /**
  * Display a notification.
- * This function uses the service worker's showNotification method if available,
- * which is required on mobile devices.
+ * This function exclusively uses the service worker's showNotification method
+ * to avoid the "Illegal constructor" issue on mobile.
  *
  * @param {NotificationType} type - The type of notification.
  * @param {NotificationOptions} options - Options for the notification.
@@ -50,6 +51,7 @@ export async function showNotification(
   type: NotificationType,
   options: NotificationOptions
 ): Promise<void> {
+  // If we can’t notify (e.g. permission not granted or no Notification support), exit.
   if (!canNotify()) return;
 
   // Set default options based on notification type.
@@ -59,6 +61,7 @@ export async function showNotification(
     requireInteraction: type === 'danger-zone',
   };
 
+  // Add sensible vibrations/tags for certain notification types.
   if (type === 'danger-zone') {
     defaultOptions.vibrate = [100, 50, 100, 50, 100, 50, 200];
     defaultOptions.tag = 'danger-zone';
@@ -67,23 +70,16 @@ export async function showNotification(
     defaultOptions.tag = 'approach-zone';
   }
 
-  // Merge default options with the provided options.
+  // Merge default options with the provided ones.
   const mergedOptions = { ...defaultOptions, ...options };
 
-  // Use the service worker's showNotification if available.
+  // Always use the service worker approach — never call "new Notification(...)" directly.
   if ('serviceWorker' in navigator) {
     try {
       const reg = await navigator.serviceWorker.ready;
       await reg.showNotification(mergedOptions.title, mergedOptions);
     } catch (err) {
       console.error('Error showing notification via service worker:', err);
-    }
-  } else {
-    // Fallback for desktop browsers.
-    try {
-      new Notification(mergedOptions.title, mergedOptions);
-    } catch (err) {
-      console.error('Error showing notification:', err);
     }
   }
 }
@@ -110,7 +106,7 @@ export async function checkProximityToDangerZones(
         zone.location.lng
       );
 
-      // If distance to zone center is less than 5km + threshold.
+      // If distance to zone center is less than 5km + threshold:
       if (distance < 5 + distanceThreshold) {
         return true;
       }
@@ -136,8 +132,10 @@ function calculateDistance(
   const dLon = deg2rad(lon2 - lon1);
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    Math.cos(deg2rad(lat1)) *
+      Math.cos(deg2rad(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 }
