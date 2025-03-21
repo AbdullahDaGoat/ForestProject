@@ -21,12 +21,12 @@ const urlsToCache = [
 
 // Helper function to determine if a request should be routed to the backend
 function isBackendRequest(url) {
-  const paths = ['/inputData', '/dangerZones'];
+  const paths = ['/inputData']; // Removed '/dangerZones' as it doesn't exist
   const urlPath = new URL(url).pathname;
   const urlObj = new URL(url);
   
   // Skip SSE connections - let them pass through directly
-  if (urlPath.startsWith('/inputData') && urlObj.searchParams.has('subscribe')) {
+  if (urlPath.startsWith('/inputData') && (urlObj.searchParams.has('subscribe') || url.includes('subscribe=true'))) {
     return false;  // Don't handle SSE connections in the service worker
   }
   
@@ -74,9 +74,8 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = event.request.url;
   
-  // Special handling for SSE requests
+  // Special handling for SSE requests - bypass service worker entirely
   if (url.includes('subscribe=true')) {
-    // Let SSE requests pass through without service worker interference
     return;
   }
   
@@ -90,7 +89,7 @@ self.addEventListener('fetch', (event) => {
         headers: event.request.headers,
         body: event.request.method !== 'GET' ? event.request.clone().body : undefined,
         mode: 'cors',
-        credentials: 'include'
+        credentials: 'same-origin' // Changed from 'include' to 'same-origin' for better compatibility
       }).catch(error => {
         console.error('Backend fetch failed:', error);
         // Queue data for sync if it's a POST request
@@ -276,11 +275,12 @@ async function performEnvironmentalCheck() {
       navigator.geolocation.getCurrentPosition(async (position) => {
         const { latitude, longitude } = position.coords;
         
-        // Fetch current danger zones from backend
-        const response = await fetch(`${BACKEND_URL}/dangerZones`);
+        // Fetch current danger zones from inputData endpoint instead of dangerZones
+        const response = await fetch(`${BACKEND_URL}/inputData`);
         if (!response.ok) return;
         
-        const { dangerZones } = await response.json();
+        const data = await response.json();
+        const dangerZones = data.dangerZones || []; // Extract danger zones from the response
         
         // Check if user is near any danger zone
         for (const zone of dangerZones) {
