@@ -1,6 +1,6 @@
 {
-  "name": "Environmental Monitoring Dashboard",
-  "short_name": "EnvMonitor",
+  "name": "Wildfire Watch",
+  "short_name": "Wildfire Watch",
   "description": "Real-time environmental monitoring from drone data",
   "start_url": "/?utm_source=pwa",
   "scope": "/",

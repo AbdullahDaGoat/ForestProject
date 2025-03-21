@@ -125,150 +125,125 @@ export default function PushNotificationSetup() {
     setLoading(true);
     setError(null);
     setSubscriptionStatus('pending');
-    
+    console.log("[subscribeToPush] Starting push subscription...");
+  
     try {
-      // First ensure notification permission is granted
+      // Step 1: Check Notification Permission
       if (Notification.permission !== 'granted') {
-        // On mobile, it's better to request permission as a result of user interaction
+        console.log("[subscribeToPush] Requesting notification permission...");
         const permissionResult = await Notification.requestPermission();
+        console.log(`[subscribeToPush] Permission result: ${permissionResult}`);
         setPermission(permissionResult);
         if (permissionResult !== 'granted') {
-          setError('Notification permission denied');
-          setLoading(false);
+          setError('Notification permission denied by user');
           setSubscriptionStatus('failed');
+          setLoading(false);
           return;
         }
       }
-      
-      // Make sure service worker is ready
+  
+      // Step 2: Service Worker Ready
+      console.log("[subscribeToPush] Waiting for Service Worker to become ready...");
       const registration = await navigator.serviceWorker.ready;
-      console.log("Service worker ready:", registration);
-      
-      // Check if we already have a subscription
+      console.log("[subscribeToPush] Service Worker is ready:", registration);
+  
+      // Step 3: Check existing subscription
       let subscription = await registration.pushManager.getSubscription();
-      
-      if (!subscription) {
-        try {
-          // Create new subscription with improved error handling
-          console.log("Creating new push subscription...");
-          
-          const applicationServerKey = urlBase64ToUint8Array(SERVER_PUBLIC_KEY);
-          
-          // Mobile browsers sometimes hang on subscribe, so use Promise.race with timeout
-          subscription = await Promise.race([
-            registration.pushManager.subscribe({
-              userVisibleOnly: true,
-              applicationServerKey
-            }),
-            new Promise<never>((_, reject) => 
-              setTimeout(() => reject(new Error("Push subscription timed out")), 15000)
-            )
-          ]);
-          
-          if (!subscription) {
-            throw new Error("Subscription creation failed");
-          }
-          
-          console.log("New subscription created successfully:", subscription);
-          
-          // Send subscription to backend
-          const response = await fetch(`${BACKEND_URL}/save-subscription`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              subscription,
-              userAgent: navigator.userAgent,
-              deviceType: /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop',
-            })
-          });
-          
-          if (!response.ok) {
-            throw new Error(`Failed to save subscription to backend: ${response.status}`);
-          }
-          
-          console.log("Subscription saved to backend successfully");
-          
-          // Important: Send a message to the service worker about the subscription
-          // This helps deal with the UI getting stuck issue
-          const swController = navigator.serviceWorker.controller;
-          if (swController) {
-            swController.postMessage({
-              type: 'SUBSCRIPTION_SUCCESSFUL',
-              subscription: subscription.endpoint
-            });
-          }
-          
-          // Test notification to verify everything is working
-          await fetch(`${BACKEND_URL}/send-test-notification`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ endpoint: subscription.endpoint })
-          });
-          
-          setPushSubscription(subscription);
-          setSubscriptionStatus('active');
-          
-        } catch (subscribeErr: any) {
-          console.error("Error in push subscription process:", subscribeErr);
-          setError(`Subscription error: ${subscribeErr.message || 'Unknown error'}`);
-          setSubscriptionStatus('failed');
-          
-          // Try to recover by unsubscribing if we got a partial subscription
-          if (subscription) {
-            try {
-              await subscription.unsubscribe();
-            } catch (unsubErr) {
-              console.warn("Cleanup after failed subscription failed:", unsubErr);
-            }
-          }
-          
-          setLoading(false);
-          return;
-        }
-      } else {
-        console.log("Using existing subscription:", subscription);
+      if (subscription) {
+        console.log("[subscribeToPush] Existing subscription found:", subscription);
         setPushSubscription(subscription);
-        
-        // Ensure the subscription is registered on the server
-        try {
-          const response = await fetch(`${BACKEND_URL}/save-subscription`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              subscription,
-              userAgent: navigator.userAgent,
-              deviceType: /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop',
-            })
-          });
-          
-          if (!response.ok) {
-            throw new Error("Failed to update existing subscription");
-          }
-          
-          // Notify the service worker about the existing subscription
-          const swController = navigator.serviceWorker.controller;
-          if (swController) {
-            swController.postMessage({
-              type: 'SUBSCRIPTION_SUCCESSFUL',
-              subscription: subscription.endpoint
-            });
-          }
-          
-          setSubscriptionStatus('active');
-        } catch (err) {
-          console.warn("Failed to update existing subscription:", err);
-          // Continue anyway as the subscription exists locally
-        }
+        setSubscriptionStatus('active');
+        setLoading(false);
+        return;
       }
-      
+  
+      // Step 4: Subscribe to Push (with timeout to prevent hanging)
+      console.log("[subscribeToPush] Creating new push subscription...");
+      const applicationServerKey = urlBase64ToUint8Array(SERVER_PUBLIC_KEY);
+  
+      subscription = await Promise.race([
+        registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Push subscription timed out after 15 seconds")), 15000)
+        )
+      ]);
+  
+      if (!subscription) {
+        throw new Error("Subscription creation returned null");
+      }
+      console.log("[subscribeToPush] Subscription created successfully:", subscription);
+  
+      // Step 5: Save subscription to backend
+      console.log("[subscribeToPush] Saving subscription to backend...");
+      const backendResponse = await fetch(`${BACKEND_URL}/save-subscription`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subscription,
+          userAgent: navigator.userAgent,
+          deviceType: /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop',
+        })
+      });
+  
+      if (!backendResponse.ok) {
+        throw new Error(`Backend error: ${backendResponse.status} - ${await backendResponse.text()}`);
+      }
+      console.log("[subscribeToPush] Subscription saved to backend successfully.");
+  
+      // Step 6: Notify Service Worker explicitly
+      if (navigator.serviceWorker.controller) {
+        console.log("[subscribeToPush] Notifying Service Worker of successful subscription.");
+        navigator.serviceWorker.controller.postMessage({
+          type: 'SUBSCRIPTION_SUCCESSFUL',
+          subscription: subscription.endpoint,
+          userAgent: navigator.userAgent,
+        });
+      } else {
+        console.warn("[subscribeToPush] No Service Worker controller found.");
+      }
+  
+      // Step 7: Send a test notification
+      console.log("[subscribeToPush] Sending test notification...");
+      const testResponse = await fetch(`${BACKEND_URL}/send-test-notification`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: subscription.endpoint })
+      });
+  
+      if (!testResponse.ok) {
+        throw new Error(`Test notification error: ${testResponse.status} - ${await testResponse.text()}`);
+      }
+      console.log("[subscribeToPush] Test notification sent successfully.");
+  
+      // Success state
+      setPushSubscription(subscription);
+      setSubscriptionStatus('active');
+  
     } catch (err: any) {
-      console.error("Push notification setup failed:", err);
-      setError(`Setup failed: ${err.message || 'Unknown error'}`);
+      console.error("[subscribeToPush] Error occurred:", err);
+      setError(`Push subscription failed: ${err.message || 'Unknown error'}`);
       setSubscriptionStatus('failed');
+  
+      // Attempt cleanup if partially subscribed
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        const existingSubscription = await registration.pushManager.getSubscription();
+        if (existingSubscription) {
+          console.log("[subscribeToPush] Cleaning up partial subscription...");
+          await existingSubscription.unsubscribe();
+          console.log("[subscribeToPush] Cleanup successful.");
+        }
+      } catch (cleanupErr) {
+        console.warn("[subscribeToPush] Cleanup error:", cleanupErr);
+      }
     } finally {
       setLoading(false);
+      console.log("[subscribeToPush] Subscription process completed.");
     }
-  };
+  };  
 
   // Unsubscribe from push notifications.
   const unsubscribeFromPush = async () => {
