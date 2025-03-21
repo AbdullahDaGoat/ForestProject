@@ -8,48 +8,49 @@ export default function ServiceWorkerManager() {
   const [registration, setRegistration] = useState<ServiceWorkerRegistration | null>(null);
 
   useEffect(() => {
-    // Check that service workers are supported and we're in a secure context.
-    if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || window.location.hostname === 'localhost')) {
-      // Wait until the window loads before registering the service worker.
+    if (
+      'serviceWorker' in navigator &&
+      (window.location.protocol === 'https:' || window.location.hostname === 'localhost')
+    ) {
       window.addEventListener('load', registerServiceWorker);
-      // Clean up the event listener when unmounting.
-      return () => {
-        window.removeEventListener('load', registerServiceWorker);
-      };
+      return () => window.removeEventListener('load', registerServiceWorker);
     } else {
-      console.error('Service workers are not supported or the page is not in a secure context.');
+      console.error('[SW Manager] Service workers not supported or insecure context.');
     }
   }, []);
 
   const registerServiceWorker = async () => {
     try {
-      // Register the service worker after the page has fully loaded.
-      const reg = await navigator.serviceWorker.register('/sw.js');
-      console.log('Service worker registered successfully', reg);
+      const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+      console.log('[SW Manager] Registered SW:', reg);
       setRegistration(reg);
 
-      // Listen for updates.
+      navigator.serviceWorker.ready.then((readyReg) => {
+        console.log('[SW Manager] SW Ready:', readyReg);
+      });
+
       reg.addEventListener('updatefound', () => {
         const newWorker = reg.installing;
         if (newWorker) {
           newWorker.addEventListener('statechange', () => {
+            console.log('[SW Manager] New SW state:', newWorker.state);
             if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              console.log('[SW Manager] New SW installed and waiting to activate.');
               setUpdateAvailable(true);
+            }
+            if (newWorker.state === 'activated') {
+              console.log('[SW Manager] SW Activated.');
             }
           });
         }
       });
 
-      // Listen for a controller change (i.e., when a new service worker takes over).
-      let refreshing = false;
       navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (!refreshing) {
-          refreshing = true;
-          window.location.reload();
-        }
+        console.log('[SW Manager] Controller changed, reloading...');
+        window.location.reload();
       });
     } catch (error) {
-      console.error('Service worker registration failed:', error);
+      console.error('[SW Manager] SW registration failed:', error);
     }
   };
 
@@ -60,9 +61,7 @@ export default function ServiceWorkerManager() {
     }
   };
 
-  if (!updateAvailable) {
-    return null;
-  }
+  if (!updateAvailable) return null;
 
   return (
     <div className="fixed bottom-4 left-4 bg-blue-600 text-white px-4 py-3 rounded-lg shadow-lg z-50 flex items-center">
