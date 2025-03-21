@@ -23,6 +23,13 @@ const urlsToCache = [
 function isBackendRequest(url) {
   const paths = ['/inputData', '/dangerZones'];
   const urlPath = new URL(url).pathname;
+  const urlObj = new URL(url);
+  
+  // Skip SSE connections - let them pass through directly
+  if (urlPath.startsWith('/inputData') && urlObj.searchParams.has('subscribe')) {
+    return false;  // Don't handle SSE connections in the service worker
+  }
+  
   return paths.some(path => urlPath.startsWith(path));
 }
 
@@ -66,6 +73,12 @@ self.addEventListener('activate', (event) => {
 // Fetch event - handle routing to backend when needed
 self.addEventListener('fetch', (event) => {
   const url = event.request.url;
+  
+  // Special handling for SSE requests
+  if (url.includes('subscribe=true')) {
+    // Let SSE requests pass through without service worker interference
+    return;
+  }
   
   // If this is a backend request, rewrite the URL
   if (isBackendRequest(url)) {
