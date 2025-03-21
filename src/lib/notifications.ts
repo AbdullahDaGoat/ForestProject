@@ -1,8 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// lib/notifications.ts
 type NotificationType = 'danger-zone' | 'approach-zone' | 'update' | 'info';
 
-interface NotificationOptions {
+export interface NotificationOptions {
   title: string;
   body: string;
   icon?: string;
@@ -18,7 +17,9 @@ interface NotificationOptions {
   requireInteraction?: boolean;
 }
 
-// Check if notifications are supported and permission is granted
+/**
+ * Check if notifications are supported and permission is granted.
+ */
 export function canNotify(): boolean {
   return (
     typeof window !== 'undefined' &&
@@ -27,30 +28,37 @@ export function canNotify(): boolean {
   );
 }
 
-// Request notification permission
+/**
+ * Request notification permission.
+ */
 export async function requestNotificationPermission(): Promise<NotificationPermission> {
   if (!('Notification' in window)) {
     return 'denied';
   }
-  
   return await Notification.requestPermission();
 }
 
-// Display a notification
-export function showNotification(
+/**
+ * Display a notification.
+ * This function uses the service worker's showNotification method if available,
+ * which is required on mobile devices.
+ *
+ * @param {NotificationType} type - The type of notification.
+ * @param {NotificationOptions} options - Options for the notification.
+ */
+export async function showNotification(
   type: NotificationType,
   options: NotificationOptions
-): void {
+): Promise<void> {
   if (!canNotify()) return;
 
-  // Set default properties based on notification type
+  // Set default options based on notification type.
   const defaultOptions: Partial<NotificationOptions> = {
     icon: '/icons/icon-192x192.png',
     badge: '/icons/icon-72x72.png',
-    requireInteraction: type === 'danger-zone', // Only danger zone notifications require interaction
+    requireInteraction: type === 'danger-zone',
   };
 
-  // Set vibration pattern based on notification type
   if (type === 'danger-zone') {
     defaultOptions.vibrate = [100, 50, 100, 50, 100, 50, 200];
     defaultOptions.tag = 'danger-zone';
@@ -59,17 +67,34 @@ export function showNotification(
     defaultOptions.tag = 'approach-zone';
   }
 
-  // Merge default options with provided options
+  // Merge default options with the provided options.
   const mergedOptions = { ...defaultOptions, ...options };
-  
-  // Show the notification
-  new Notification(mergedOptions.title, mergedOptions);
+
+  // Use the service worker's showNotification if available.
+  if ('serviceWorker' in navigator) {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      await reg.showNotification(mergedOptions.title, mergedOptions);
+    } catch (err) {
+      console.error('Error showing notification via service worker:', err);
+    }
+  } else {
+    // Fallback for desktop browsers.
+    try {
+      new Notification(mergedOptions.title, mergedOptions);
+    } catch (err) {
+      console.error('Error showing notification:', err);
+    }
+  }
 }
 
-// Helper function to check if user is within a specific distance of a danger zone
+/**
+ * Helper function to check if user is within a specific distance of a danger zone.
+ * Returns true if any danger zone is within (5km + distanceThreshold) of the user.
+ */
 export async function checkProximityToDangerZones(
   dangerZones: Array<{ location: { lat: number; lng: number } }>,
-  distanceThreshold: number = 2 // Default 2km proximity alert
+  distanceThreshold: number = 2
 ): Promise<boolean> {
   if (!('geolocation' in navigator)) return false;
 
@@ -77,7 +102,6 @@ export async function checkProximityToDangerZones(
     const position = await getCurrentPosition();
     const { latitude, longitude } = position.coords;
 
-    // Check if any danger zone is within the threshold
     for (const zone of dangerZones) {
       const distance = calculateDistance(
         latitude,
@@ -86,12 +110,11 @@ export async function checkProximityToDangerZones(
         zone.location.lng
       );
 
-      // If distance to zone center is less than 5km + threshold, user is approaching the zone
+      // If distance to zone center is less than 5km + threshold.
       if (distance < 5 + distanceThreshold) {
         return true;
       }
     }
-    
     return false;
   } catch (error) {
     console.error('Error getting user location:', error);
@@ -99,7 +122,9 @@ export async function checkProximityToDangerZones(
   }
 }
 
-// Calculate distance between two points in km using the Haversine formula
+/**
+ * Calculate distance between two points in km using the Haversine formula.
+ */
 function calculateDistance(
   lat1: number,
   lon1: number,
@@ -111,23 +136,28 @@ function calculateDistance(
   const dLon = deg2rad(lon2 - lon1);
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  const d = R * c; // Distance in km
-  return d;
+  return R * c;
 }
 
+/**
+ * Convert degrees to radians.
+ */
 function deg2rad(deg: number): number {
   return deg * (Math.PI / 180);
 }
 
-// Promisify getCurrentPosition
+/**
+ * Promisify getCurrentPosition.
+ */
 function getCurrentPosition(): Promise<GeolocationPosition> {
   return new Promise((resolve, reject) => {
     navigator.geolocation.getCurrentPosition(resolve, reject, {
       enableHighAccuracy: true,
       timeout: 5000,
-      maximumAge: 0
+      maximumAge: 0,
     });
   });
 }
