@@ -18,6 +18,7 @@ const BACKEND_URL = 'https://forestproject-backend-production.up.railway.app';
 
 export default function PushNotificationSetup() {
   const [permission, setPermission] = useState<NotificationPermission | 'default'>('default');
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [supported, setSupported] = useState(true);
   const [pushSubscription, setPushSubscription] = useState<PushSubscription | null>(null);
   const [locationPermission, setLocationPermission] = useState<PermissionState | 'default'>('default');
@@ -30,21 +31,23 @@ export default function PushNotificationSetup() {
     if (typeof window !== 'undefined') {
       const isPushSupported = 'Notification' in window && 'serviceWorker' in navigator && 'PushManager' in window;
       setSupported(isPushSupported);
-      
+
       if (isPushSupported) {
         setPermission(Notification.permission);
         navigator.serviceWorker.ready.then(registration => {
           registration.pushManager.getSubscription().then(subscription => {
+            if (subscription) {
+              console.log("Existing subscription found:", subscription);
+            }
             setPushSubscription(subscription);
-            // Optionally, notify your backend if the user is already subscribed.
           });
         });
       }
-      
+
       if ('permissions' in navigator) {
         navigator.permissions.query({ name: 'geolocation' as PermissionName }).then(result => {
           setLocationPermission(result.state);
-          result.onchange = function() {
+          result.onchange = function () {
             setLocationPermission(this.state);
           };
         });
@@ -54,14 +57,13 @@ export default function PushNotificationSetup() {
 
   // Helper: Convert base64 string to Uint8Array
   function urlBase64ToUint8Array(base64String: string) {
-    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
     const base64 = (base64String + padding)
       .replace(/-/g, '+')
       .replace(/_/g, '/');
-  
+
     const rawData = window.atob(base64);
     const outputArray = new Uint8Array(rawData.length);
-  
     for (let i = 0; i < rawData.length; ++i) {
       outputArray[i] = rawData.charCodeAt(i);
     }
@@ -70,65 +72,47 @@ export default function PushNotificationSetup() {
 
   // Subscribe user to push notifications and send subscription to backend
   const subscribeToPush = async () => {
+    setLoading(true);
+    setError(null);
     try {
-      setLoading(true);
-      setError(null);
-      
-      // Request permission if not granted
       if (Notification.permission !== 'granted') {
         const permissionResult = await Notification.requestPermission();
         setPermission(permissionResult);
         if (permissionResult !== 'granted') {
           setError('Notification permission denied');
-          setLoading(false);
           return;
         }
       }
-      
       const registration = await navigator.serviceWorker.ready;
+      console.log("Service worker ready for push subscription");
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(SERVER_PUBLIC_KEY)
       });
-      
-      console.log('Push subscription:', JSON.stringify(subscription));
+      console.log("Push subscription successful:", JSON.stringify(subscription));
       setPushSubscription(subscription);
 
       // Send the subscription to your backend API
-      await fetch(`${BACKEND_URL}/save-subscription`, {
+      const res = await fetch(`${BACKEND_URL}/save-subscription`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(subscription)
       });
-      
-      // Optionally register periodic background sync if needed
-      if ('periodicSync' in registration) {
-        try {
-          const status = await navigator.permissions.query({
-            name: 'periodic-background-sync' as any
-          });
-          if (status.state === 'granted') {
-            await (registration as any).periodicSync.register('environmental-check', {
-              minInterval: 15 * 60 * 1000 // 15 minutes
-            });
-          }
-        } catch (err) {
-          console.warn('Periodic background sync not supported', err);
-        }
+      if (!res.ok) {
+        throw new Error(`Backend subscription save failed with status ${res.status}`);
       }
-      
-      setLoading(false);
     } catch (err: any) {
-      console.error('Failed to subscribe to push notifications:', err);
+      console.error("Failed to subscribe to push notifications:", err);
       setError(err.message || 'Failed to subscribe to push notifications');
+    } finally {
       setLoading(false);
     }
   };
 
   // Unsubscribe user from push notifications
   const unsubscribeFromPush = async () => {
+    setLoading(true);
     try {
-      setLoading(true);
       if (pushSubscription) {
         await pushSubscription.unsubscribe();
         setPushSubscription(null);
@@ -136,11 +120,12 @@ export default function PushNotificationSetup() {
         if ('periodicSync' in registration) {
           await (registration as any).periodicSync.unregister('environmental-check');
         }
+        console.log("Unsubscribed from push notifications.");
       }
-      setLoading(false);
     } catch (err: any) {
-      console.error('Failed to unsubscribe:', err);
+      console.error("Failed to unsubscribe:", err);
       setError(err.message || 'Failed to unsubscribe');
+    } finally {
       setLoading(false);
     }
   };
@@ -151,10 +136,10 @@ export default function PushNotificationSetup() {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         position => {
           setLocationPermission('granted');
-          console.log('Location permission granted');
+          console.log("Location permission granted");
         },
         error => {
-          console.error('Location permission denied:', error);
+          console.error("Location permission denied:", error);
           setLocationPermission('denied');
         }
       );
@@ -166,15 +151,6 @@ export default function PushNotificationSetup() {
     setNotificationRange(value);
     localStorage.setItem('notificationRange', value.toString());
   };
-
-  if (!supported) {
-    return (
-      <div className="flex items-center space-x-3 bg-amber-50 border border-amber-200 text-amber-800 px-6 py-4 rounded-lg shadow-sm">
-        <AlertTriangle className="h-5 w-5 text-amber-500 flex-shrink-0" />
-        <p className="font-medium">Push notifications are not supported in your browser.</p>
-      </div>
-    );
-  }
 
   return (
     <div className="bg-white rounded-xl shadow-md overflow-hidden border border-gray-100">
@@ -203,7 +179,7 @@ export default function PushNotificationSetup() {
           {/* Notification Permission Section */}
           <div className="border-b border-gray-100 pb-6">
             <h4 className="text-lg font-medium text-gray-900 mb-3">Push Notifications</h4>
-            
+
             {permission === 'granted' ? (
               <div className="flex items-start space-x-3">
                 <CheckCircle className="h-6 w-6 text-green-500 mt-0.5 flex-shrink-0" />
@@ -212,7 +188,6 @@ export default function PushNotificationSetup() {
                   <p className="text-green-700 text-sm mt-1">
                     You&apos;ll receive real-time alerts for environmental hazards.
                   </p>
-                  
                   {pushSubscription ? (
                     <button
                       onClick={unsubscribeFromPush}
@@ -241,7 +216,7 @@ export default function PushNotificationSetup() {
                     Please update your browser settings to enable environmental alerts.
                   </p>
                   <div className="mt-3">
-                    <a 
+                    <a
                       href="#"
                       onClick={() => window.open('chrome://settings/content/notifications')}
                       className="text-red-600 text-sm font-medium underline hover:text-red-800"
@@ -285,11 +260,11 @@ export default function PushNotificationSetup() {
               </div>
             )}
           </div>
-          
+
           {/* Location Permission Section */}
           <div className="border-b border-gray-100 pb-6">
             <h4 className="text-lg font-medium text-gray-900 mb-3">Location Access</h4>
-            
+
             {locationPermission === 'granted' ? (
               <div className="flex items-start space-x-3">
                 <CheckCircle className="h-6 w-6 text-green-500 mt-0.5 flex-shrink-0" />
@@ -309,7 +284,7 @@ export default function PushNotificationSetup() {
                     Without location access, we can&apos;t send you alerts about hazards near you.
                   </p>
                   <div className="mt-3">
-                    <a 
+                    <a
                       href="#"
                       onClick={() => window.open('chrome://settings/content/location')}
                       className="text-yellow-600 text-sm font-medium underline hover:text-yellow-800"
@@ -342,7 +317,7 @@ export default function PushNotificationSetup() {
               </div>
             )}
           </div>
-          
+
           {/* Advanced Settings */}
           <div>
             <button
@@ -352,16 +327,16 @@ export default function PushNotificationSetup() {
               <Settings className="h-4 w-4 mr-1.5" />
               {showAdvancedOptions ? 'Hide advanced settings' : 'Show advanced settings'}
             </button>
-            
+
             {showAdvancedOptions && (
               <div className="mt-4 bg-gray-50 rounded-lg p-4 border border-gray-200">
                 <h5 className="font-medium text-gray-800 mb-3">Notification Range</h5>
-                
+
                 <div className="space-y-2">
                   <p className="text-sm text-gray-600">
                     Choose how far from a danger zone you want to receive alerts:
                   </p>
-                  
+
                   <div className="flex items-center space-x-2">
                     <input
                       type="range"
@@ -373,7 +348,7 @@ export default function PushNotificationSetup() {
                       className="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-blue-600"
                     />
                   </div>
-                  
+
                   <div className="flex justify-between text-xs text-gray-500">
                     <span>1km</span>
                     <span>2km</span>
@@ -381,12 +356,12 @@ export default function PushNotificationSetup() {
                     <span>4km</span>
                     <span>5km</span>
                   </div>
-                  
+
                   <p className="text-sm font-medium text-gray-700 mt-2">
                     Current setting: Notify me when I&apos;m within {notificationRange}km of a danger zone border
                   </p>
                 </div>
-                
+
                 <div className="mt-4 bg-blue-50 rounded-md p-3 flex items-start">
                   <Info className="h-5 w-5 text-blue-500 mt-0.5 mr-2 flex-shrink-0" />
                   <p className="text-sm text-blue-700">
