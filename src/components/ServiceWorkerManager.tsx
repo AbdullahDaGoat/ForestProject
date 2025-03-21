@@ -51,7 +51,6 @@ export default function ServiceWorkerManager() {
     }
   };
 
-  // ✅ Force update on user action
   const updateServiceWorker = () => {
     if (registration?.waiting) {
       console.log('🔄 Sending SKIP_WAITING message to service worker...');
@@ -69,7 +68,7 @@ export default function ServiceWorkerManager() {
         onClick={updateServiceWorker}
         className="ml-3 bg-white text-blue-600 px-3 py-1 rounded-md text-sm font-medium"
       >
-        Refresh
+        Refresh  
       </button>
     </div>
   );
