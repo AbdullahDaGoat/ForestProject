@@ -8,19 +8,27 @@ export default function ServiceWorkerManager() {
   const [registration, setRegistration] = useState<ServiceWorkerRegistration | null>(null);
 
   useEffect(() => {
-    if ('serviceWorker' in navigator && window.location.protocol === 'https:') {
-      registerServiceWorker();
+    // Check that service workers are supported and we're in a secure context.
+    if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || window.location.hostname === 'localhost')) {
+      // Wait until the window loads before registering the service worker.
+      window.addEventListener('load', registerServiceWorker);
+      // Clean up the event listener when unmounting.
+      return () => {
+        window.removeEventListener('load', registerServiceWorker);
+      };
+    } else {
+      console.error('Service workers are not supported or the page is not in a secure context.');
     }
   }, []);
 
   const registerServiceWorker = async () => {
     try {
-      // Register the service worker
+      // Register the service worker after the page has fully loaded.
       const reg = await navigator.serviceWorker.register('/sw.js');
       console.log('Service worker registered successfully', reg);
       setRegistration(reg);
 
-      // Check for updates
+      // Listen for updates.
       reg.addEventListener('updatefound', () => {
         const newWorker = reg.installing;
         if (newWorker) {
@@ -32,7 +40,7 @@ export default function ServiceWorkerManager() {
         }
       });
 
-      // Detect controller change
+      // Listen for a controller change (i.e., when a new service worker takes over).
       let refreshing = false;
       navigator.serviceWorker.addEventListener('controllerchange', () => {
         if (!refreshing) {
@@ -47,7 +55,6 @@ export default function ServiceWorkerManager() {
 
   const updateServiceWorker = () => {
     if (registration && registration.waiting) {
-      // Send message to SW to skip waiting and activate new version
       registration.waiting.postMessage({ type: 'SKIP_WAITING' });
       setUpdateAvailable(false);
     }
