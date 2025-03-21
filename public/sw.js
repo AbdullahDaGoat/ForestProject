@@ -1,7 +1,7 @@
 // Service Worker for PWA functionality
 
 // Configure backend URL - change this when deploying
-const BACKEND_URL = 'http://localhost:4000';
+const BACKEND_URL = 'https://forestproject-backend-production.up.railway.app';
 const CACHE_NAME = 'env-monitor-v1';
 
 // Frontend assets to cache

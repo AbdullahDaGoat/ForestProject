@@ -67,7 +67,7 @@ export default function DangerMap() {
   const [usePolling, setUsePolling] = useState(false);
   
   // Define backend URL
-  const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:4000';
+  const BACKEND_URL = 'https://forestproject-backend-production.up.railway.app';
 
   const dangerLevelColorMap: Record<string, string> = {
     low: "bg-green-500",

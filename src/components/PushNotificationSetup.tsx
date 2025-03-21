@@ -14,7 +14,7 @@ import {
 
 // Paste your public VAPID key here
 const SERVER_PUBLIC_KEY = "BMIlphB5UNplAcbs-4nVB9eHiIyawSQbd65fu8jm52PN4K5D_VYOhbwjcHDoCfXc02zl8xSYB0Rto8_zc6r3Qcs";
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:4000';
+const BACKEND_URL = 'https://forestproject-backend-production.up.railway.app';
 
 export default function PushNotificationSetup() {
   const [permission, setPermission] = useState<NotificationPermission | 'default'>('default');

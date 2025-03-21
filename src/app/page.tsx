@@ -10,7 +10,7 @@ import { HelpCircle, AlertTriangle, Info, Map, Clock, Menu, X } from 'lucide-rea
 const DangerMap = dynamic(() => import('@/components/DangerMap'), { ssr: false });
 
 // Hardcoded backend URL as requested
-const BACKEND_URL = 'http://localhost:4000';
+const BACKEND_URL = 'https://forestproject-backend-production.up.railway.app';
 
 export default function Home() {
   const [stats, setStats] = useState({
