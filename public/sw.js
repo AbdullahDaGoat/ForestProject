@@ -1,12 +1,14 @@
 /**
- * Service Worker for PWA functionality with push notifications and background sync.
+ * Fully Refactored Service Worker for PWA functionality.
+ * - Uses self.registration.showNotification() to display notifications.
+ * - Instead of directly calling geolocation (which causes violations), it
+ *   sends a message to the client requesting location data.
+ * - Rewrites backend requests to your configured BACKEND_URL.
  */
 
-// Configure backend URL (change this when deploying)
+// Configuration
 const BACKEND_URL = 'https://forestproject-backend-production.up.railway.app';
 const CACHE_NAME = 'env-monitor-v1';
-
-// Assets to cache for offline support
 const urlsToCache = [
   '/',
   '/manifest.json',
@@ -21,31 +23,21 @@ const urlsToCache = [
 ];
 
 /**
- * Determines if a URL should be routed to the backend.
- * SSE requests (subscribe=true) are bypassed.
- * @param {string} url
- * @returns {boolean}
+ * Checks if a URL should be routed to the backend.
  */
 function isBackendRequest(url) {
   const paths = ['/inputData'];
   const urlObj = new URL(url);
   const urlPath = urlObj.pathname;
-  
-  // Bypass SSE connections
-  if (
-    urlPath.startsWith('/inputData') &&
-    (urlObj.searchParams.has('subscribe') || url.includes('subscribe=true'))
-  ) {
+  // Do not intercept SSE requests
+  if (urlPath.startsWith('/inputData') && (urlObj.searchParams.has('subscribe') || url.includes('subscribe=true'))) {
     return false;
   }
-  
   return paths.some(path => urlPath.startsWith(path));
 }
 
 /**
- * Rewrites URLs to point to the backend.
- * @param {string} url
- * @returns {string}
+ * Rewrites a URL to point to the backend.
  */
 function rewriteUrlIfNeeded(url) {
   if (isBackendRequest(url)) {
@@ -55,21 +47,21 @@ function rewriteUrlIfNeeded(url) {
   return url;
 }
 
-// INSTALL: Cache frontend assets and immediately activate new SW.
+// INSTALL: Cache essential frontend assets.
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(urlsToCache))
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(urlsToCache))
   );
 });
 
-// ACTIVATE: Clean up old caches and take control of clients.
+// ACTIVATE: Clean up old caches and claim clients.
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     Promise.all([
-      caches.keys().then(cacheNames =>
+      caches.keys().then((cacheNames) =>
         Promise.all(
-          cacheNames.map(cacheName => {
+          cacheNames.map((cacheName) => {
             if (cacheName !== CACHE_NAME) {
               return caches.delete(cacheName);
             }
@@ -81,15 +73,13 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// FETCH: Route backend requests to the backend URL; otherwise use cache-first.
+// FETCH: For backend requests, rewrite URL; otherwise use cache-first.
 self.addEventListener('fetch', (event) => {
   const requestUrl = event.request.url;
-  
-  // Bypass service worker for SSE connections.
+  // Bypass SSE connections.
   if (requestUrl.includes('subscribe=true')) {
     return;
   }
-  
   if (isBackendRequest(requestUrl)) {
     const backendUrl = rewriteUrlIfNeeded(requestUrl);
     event.respondWith(
@@ -99,57 +89,65 @@ self.addEventListener('fetch', (event) => {
         body: event.request.method !== 'GET' ? event.request.clone().body : undefined,
         mode: 'cors',
         credentials: 'same-origin'
-      }).catch(error => {
+      }).catch((error) => {
         console.error('Backend fetch failed:', error);
-        // For POST requests, try queueing data for sync.
+        // For POST requests, queue data for background sync.
         if (event.request.method === 'POST' && requestUrl.includes('/inputData')) {
-          return event.request.clone().json().then(data =>
-            queueDataForSync(data).then(() =>
-              new Response(JSON.stringify({
-                success: true,
-                message: 'Data saved for sync when online'
-              }), {
-                headers: { 'Content-Type': 'application/json' }
-              })
-            )
-          );
+          return event.request.clone().json().then((data) => {
+            return queueDataForSync(data).then(() => {
+              return new Response(
+                JSON.stringify({
+                  success: true,
+                  message: 'Data saved for sync when online'
+                }),
+                { headers: { 'Content-Type': 'application/json' } }
+              );
+            });
+          });
         }
-        return new Response(JSON.stringify({
-          error: 'Network error, please try again later'
-        }), {
-          status: 503,
-          headers: { 'Content-Type': 'application/json' }
-        });
+        return new Response(
+          JSON.stringify({ error: 'Network error, please try again later' }),
+          { status: 503, headers: { 'Content-Type': 'application/json' } }
+        );
       })
     );
     return;
   }
-  
-  // Use a cache-first strategy for other requests.
+  // For other requests, use a cache-first strategy.
   event.respondWith(
-    caches.match(event.request).then(response => {
+    caches.match(event.request).then((response) => {
       if (response) return response;
-      return fetch(event.request).then(networkResponse => {
-        // Only cache valid responses.
+      return fetch(event.request).then((networkResponse) => {
         if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
           return networkResponse;
         }
         const responseToCache = networkResponse.clone();
-        caches.open(CACHE_NAME).then(cache => {
+        caches.open(CACHE_NAME).then((cache) => {
           cache.put(event.request, responseToCache);
         });
         return networkResponse;
       }).catch(() => {
-        // Optionally, return a fallback response.
+        // Optionally, you can return a fallback response.
       });
     })
   );
 });
 
-/**
- * Queue data for background sync using IndexedDB.
- * @param {any} data
- */
+// IndexedDB helper: Open a database.
+function openDB(name, version, upgradeCallback) {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(name, version);
+    if (upgradeCallback) {
+      request.onupgradeneeded = (event) => {
+        upgradeCallback(event.target.result);
+      };
+    }
+    request.onsuccess = (event) => resolve(event.target.result);
+    request.onerror = (event) => reject(event.target.error);
+  });
+}
+
+// Queue data for background sync.
 async function queueDataForSync(data) {
   try {
     const db = await openDB('environmentalData', 1, {
@@ -198,7 +196,6 @@ async function syncEnvironmentalData() {
 
 // PUSH EVENT: Handle incoming push notifications.
 self.addEventListener('push', (event) => {
-  // Default notification options.
   let notificationData = {
     title: 'Environmental Alert',
     body: 'New environmental alert detected!',
@@ -207,8 +204,6 @@ self.addEventListener('push', (event) => {
     tag: 'environmental-alert',
     data: { url: '/' }
   };
-
-  // If a payload is provided, merge it with the default.
   if (event.data) {
     try {
       const data = event.data.json();
@@ -217,15 +212,11 @@ self.addEventListener('push', (event) => {
       console.error('Error parsing push notification data:', e);
     }
   }
-
-  // Set vibration pattern based on danger level.
   if (notificationData.dangerLevel === 'extreme' || notificationData.dangerLevel === 'high') {
     notificationData.vibrate = [100, 50, 100, 50, 100, 50, 200];
   } else if (notificationData.dangerLevel === 'medium') {
     notificationData.vibrate = [100, 50, 100];
   }
-  
-  // Use ServiceWorkerRegistration.showNotification() to display the notification.
   event.waitUntil(
     self.registration.showNotification(notificationData.title, notificationData)
       .catch(err => console.error('Error showing notification:', err))
@@ -236,7 +227,7 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   event.waitUntil(
-    clients.matchAll({ type: 'window' }).then(clientList => {
+    clients.matchAll({ type: 'window' }).then((clientList) => {
       for (const client of clientList) {
         if ('url' in client && client.url === event.notification.data.url && 'focus' in client) {
           return client.focus();
@@ -249,7 +240,8 @@ self.addEventListener('notificationclick', (event) => {
   );
 });
 
-// PERIODIC BACKGROUND SYNC: Perform environmental checks.
+// PERIODIC SYNC: Instead of directly accessing geolocation in SW,
+// send a message to the client requesting location data.
 self.addEventListener('periodicsync', (event) => {
   if (event.tag === 'environmental-check') {
     event.waitUntil(performEnvironmentalCheck());
@@ -257,48 +249,64 @@ self.addEventListener('periodicsync', (event) => {
 });
 
 async function performEnvironmentalCheck() {
-  if ('geolocation' in self) {
-    try {
-      navigator.geolocation.getCurrentPosition(async (position) => {
-        const { latitude, longitude } = position.coords;
-        const response = await fetch(`${BACKEND_URL}/inputData`);
-        if (!response.ok) return;
-        const data = await response.json();
-        const dangerZones = data.dangerZones || [];
-        for (const zone of dangerZones) {
-          const distance = calculateDistance(
-            latitude,
-            longitude,
-            zone.location.lat,
-            zone.location.lng
-          );
-          if (distance < 7) {
-            const notificationTitle = distance < 5
-              ? '⚠️ You are in a danger zone!'
-              : '⚡ You are approaching a danger zone';
-            const notificationBody = distance < 5
-              ? `You are currently inside a ${zone.dangerLevel} risk area. Take necessary precautions.`
-              : `You are ${Math.round(distance - 5)}km from a ${zone.dangerLevel} risk area. Be alert.`;
-            await self.registration.showNotification(notificationTitle, {
-              body: notificationBody,
-              icon: '/icons/icon-192x192.png',
-              badge: '/icons/icon-72x72.png',
-              tag: 'proximity-alert',
-              data: { url: '/', zoneId: zone.id },
-              vibrate: distance < 5 ? [100, 50, 100, 50, 200] : [100, 50, 100]
-            });
-            break;
-          }
-        }
-      });
-    } catch (error) {
-      console.error('Error performing background check:', error);
+  try {
+    const allClients = await self.clients.matchAll();
+    if (allClients.length > 0) {
+      // Send a message to the first client to request location.
+      allClients[0].postMessage({ type: 'REQUEST_LOCATION' });
     }
+  } catch (error) {
+    console.error('Error performing background check:', error);
+  }
+}
+
+// Listen for messages from clients.
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'LOCATION_DATA') {
+    const { latitude, longitude } = event.data;
+    checkDangerZones(latitude, longitude);
+  }
+});
+
+// Check danger zones given the user's location.
+async function checkDangerZones(latitude, longitude) {
+  try {
+    const response = await fetch(`${BACKEND_URL}/inputData`);
+    if (!response.ok) return;
+    const data = await response.json();
+    const dangerZones = data.dangerZones || [];
+    for (const zone of dangerZones) {
+      const distance = calculateDistance(
+        latitude,
+        longitude,
+        zone.location.lat,
+        zone.location.lng
+      );
+      if (distance < 7) {
+        const notificationTitle = distance < 5
+          ? '⚠️ You are in a danger zone!'
+          : '⚡ You are approaching a danger zone';
+        const notificationBody = distance < 5
+          ? `You are currently inside a ${zone.dangerLevel} risk area. Take necessary precautions.`
+          : `You are ${Math.round(distance - 5)}km from a ${zone.dangerLevel} risk area. Be alert.`;
+        await self.registration.showNotification(notificationTitle, {
+          body: notificationBody,
+          icon: '/icons/icon-192x192.png',
+          badge: '/icons/icon-72x72.png',
+          tag: 'proximity-alert',
+          data: { url: '/', zoneId: zone.id },
+          vibrate: distance < 5 ? [100, 50, 100, 50, 200] : [100, 50, 100]
+        });
+        break;
+      }
+    }
+  } catch (error) {
+    console.error('Error checking danger zones:', error);
   }
 }
 
 /**
- * Calculates the Haversine distance between two latitude/longitude points.
+ * Calculates the Haversine distance between two points (in km).
  * @param {number} lat1 
  * @param {number} lon1 
  * @param {number} lat2 
@@ -323,24 +331,4 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
  */
 function deg2rad(deg) {
   return deg * (Math.PI / 180);
-}
-
-/**
- * Simple wrapper for opening an IndexedDB database.
- * @param {string} name 
- * @param {number} version 
- * @param {Function} upgradeCallback 
- * @returns {Promise<any>}
- */
-function openDB(name, version, upgradeCallback) {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(name, version);
-    if (upgradeCallback) {
-      request.onupgradeneeded = (event) => {
-        upgradeCallback(event.target.result);
-      };
-    }
-    request.onsuccess = (event) => resolve(event.target.result);
-    request.onerror = (event) => reject(event.target.error);
-  });
 }

@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 
 // Paste your public VAPID key here
-const SERVER_PUBLIC_KEY = "BMIlphB5UNplAcbs-4nVB9eHiIyawSQbd65fu8jm52PN4K5D_VYOhbwjcHDoCfXc02zl8xSYB0Rto8_zc6r3Qcs";
+const SERVER_PUBLIC_KEY = "BFvwfwSPtFBlC6QOB8h2RcapVKbn0PL3Yxj4J96pQIwkWu4fWTjgqv1eJ9N8lfk4sMPVKZkt19BCI49kMuQcpns";
 const BACKEND_URL = 'https://forestproject-backend-production.up.railway.app';
 
 export default function PushNotificationSetup() {

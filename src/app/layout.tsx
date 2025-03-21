@@ -2,11 +2,12 @@ import './globals.css';
 import type { Metadata } from 'next';
 import MediaSessionManager from '../components/MediaSessionManager.client';
 import ServiceWorkerManagerClient from '../components/ServiceWorkerManager.client';
+import LocationManager from '../components/LocationManager'; // Import the new component
 
 export const metadata: Metadata = {
   title: 'Environmental Monitoring Dashboard',
   description: 'Real-time environmental monitoring from drone data',
-  manifest: '/manifest.json'
+  manifest: '/manifest.json',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -21,6 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {children}
         <MediaSessionManager />
         <ServiceWorkerManagerClient />
+        <LocationManager /> {/* This will set up the listener */}
       </body>
     </html>
   );
