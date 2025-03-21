@@ -545,7 +545,7 @@ function adjustSeverityForLandscape(
   
     // Determine risk level based on score AND basic assessment
     // This ensures extreme temperatures always result in at least high risk
-    let riskLevel = determineRiskLevel(totalScore, basicAssessment.level);
+    const riskLevel = determineRiskLevel(totalScore, basicAssessment.level);
   
     const riskExplanation = `
       Adaptive Radius: ${radius} km
