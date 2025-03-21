@@ -6,32 +6,25 @@ import {
   Bell,
   AlertTriangle,
   CheckCircle,
-  XCircle,
-  Settings,
-  Info,
-  MapPin
+  XCircle
 } from 'lucide-react';
 
-// Paste your public VAPID key here
+// Your public VAPID key (must be base64 URL-safe)
 const SERVER_PUBLIC_KEY = "BFvwfwSPtFBlC6QOB8h2RcapVKbn0PL3Yxj4J96pQIwkWu4fWTjgqv1eJ9N8lfk4sMPVKZkt19BCI49kMuQcpns";
+// Your backend URL (where push subscriptions are stored)
 const BACKEND_URL = 'https://forestproject-backend-production.up.railway.app';
 
 export default function PushNotificationSetup() {
   const [permission, setPermission] = useState<NotificationPermission | 'default'>('default');
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [supported, setSupported] = useState(true);
   const [pushSubscription, setPushSubscription] = useState<PushSubscription | null>(null);
-  const [locationPermission, setLocationPermission] = useState<PermissionState | 'default'>('default');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   const [notificationRange, setNotificationRange] = useState<number>(2);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const isPushSupported = 'Notification' in window && 'serviceWorker' in navigator && 'PushManager' in window;
-      setSupported(isPushSupported);
-
+      // If push notifications aren't supported, you might handle that here.
       if (isPushSupported) {
         setPermission(Notification.permission);
         navigator.serviceWorker.ready.then(registration => {
@@ -43,25 +36,15 @@ export default function PushNotificationSetup() {
           });
         });
       }
-
-      if ('permissions' in navigator) {
-        navigator.permissions.query({ name: 'geolocation' as PermissionName }).then(result => {
-          setLocationPermission(result.state);
-          result.onchange = function () {
-            setLocationPermission(this.state);
-          };
-        });
-      }
     }
   }, []);
 
-  // Helper: Convert base64 string to Uint8Array
+  // Helper: Convert a base64 URL-safe string to a Uint8Array.
   function urlBase64ToUint8Array(base64String: string) {
     const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
     const base64 = (base64String + padding)
       .replace(/-/g, '+')
       .replace(/_/g, '/');
-
     const rawData = window.atob(base64);
     const outputArray = new Uint8Array(rawData.length);
     for (let i = 0; i < rawData.length; ++i) {
@@ -70,11 +53,13 @@ export default function PushNotificationSetup() {
     return outputArray;
   }
 
-  // Subscribe user to push notifications and send subscription to backend
+  // Subscribe the user to push notifications.
+  // A Promise.race with a timeout ensures that if the pushManager.subscribe hangs, it rejects after 10 seconds.
   const subscribeToPush = async () => {
     setLoading(true);
     setError(null);
     try {
+      // Request permission if needed.
       if (Notification.permission !== 'granted') {
         const permissionResult = await Notification.requestPermission();
         setPermission(permissionResult);
@@ -84,23 +69,32 @@ export default function PushNotificationSetup() {
         }
       }
       const registration = await navigator.serviceWorker.ready;
-      console.log("Service worker ready for push subscription");
-      const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(SERVER_PUBLIC_KEY)
-      });
-      console.log("Push subscription successful:", JSON.stringify(subscription));
-      setPushSubscription(subscription);
-
-      // Send the subscription to your backend API
-      const res = await fetch(`${BACKEND_URL}/save-subscription`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(subscription)
-      });
-      if (!res.ok) {
-        throw new Error(`Backend subscription save failed with status ${res.status}`);
+      console.log("Service worker ready:", registration);
+      let subscription = await registration.pushManager.getSubscription();
+      if (!subscription) {
+        subscription = await Promise.race([
+          registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(SERVER_PUBLIC_KEY)
+          }),
+          new Promise<PushSubscription>((_resolve, reject) =>
+            setTimeout(() => reject(new Error("Push subscription timeout")), 10000)
+          )
+        ]);
+        console.log("New subscription created:", subscription);
+        // Send the new subscription to your backend.
+        const res = await fetch(`${BACKEND_URL}/save-subscription`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(subscription)
+        });
+        if (!res.ok) {
+          throw new Error(`Backend subscription save failed with status ${res.status}`);
+        }
+      } else {
+        console.log("Using existing subscription:", subscription);
       }
+      setPushSubscription(subscription);
     } catch (err: any) {
       console.error("Failed to subscribe to push notifications:", err);
       setError(err.message || 'Failed to subscribe to push notifications');
@@ -109,7 +103,7 @@ export default function PushNotificationSetup() {
     }
   };
 
-  // Unsubscribe user from push notifications
+  // Unsubscribe from push notifications.
   const unsubscribeFromPush = async () => {
     setLoading(true);
     try {
@@ -130,22 +124,6 @@ export default function PushNotificationSetup() {
     }
   };
 
-  const requestLocationPermission = () => {
-    if ('geolocation' in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        position => {
-          setLocationPermission('granted');
-          console.log("Location permission granted");
-        },
-        error => {
-          console.error("Location permission denied:", error);
-          setLocationPermission('denied');
-        }
-      );
-    }
-  };
-
   const handleRangeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = parseInt(e.target.value);
     setNotificationRange(value);
@@ -163,7 +141,6 @@ export default function PushNotificationSetup() {
           Customize how and when you receive critical environmental alerts
         </p>
       </div>
-
       <div className="p-6">
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4 flex items-start">
@@ -174,12 +151,10 @@ export default function PushNotificationSetup() {
             </div>
           </div>
         )}
-
         <div className="space-y-6">
-          {/* Notification Permission Section */}
+          {/* Push Notifications Section */}
           <div className="border-b border-gray-100 pb-6">
             <h4 className="text-lg font-medium text-gray-900 mb-3">Push Notifications</h4>
-
             {permission === 'granted' ? (
               <div className="flex items-start space-x-3">
                 <CheckCircle className="h-6 w-6 text-green-500 mt-0.5 flex-shrink-0" />
@@ -194,7 +169,7 @@ export default function PushNotificationSetup() {
                       disabled={loading}
                       className="mt-3 text-sm font-medium text-red-600 hover:text-red-800 flex items-center"
                     >
-                      {loading ? 'Unsubscribing...' : 'Disable notifications'}
+                      {loading ? 'Processing...' : 'Disable notifications'}
                     </button>
                   ) : (
                     <button
@@ -260,116 +235,35 @@ export default function PushNotificationSetup() {
               </div>
             )}
           </div>
-
-          {/* Location Permission Section */}
+          {/* Notification Range Section */}
           <div className="border-b border-gray-100 pb-6">
-            <h4 className="text-lg font-medium text-gray-900 mb-3">Location Access</h4>
-
-            {locationPermission === 'granted' ? (
-              <div className="flex items-start space-x-3">
-                <CheckCircle className="h-6 w-6 text-green-500 mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="font-medium text-green-800">Location access enabled</p>
-                  <p className="text-green-700 text-sm mt-1">
-                    We can alert you about environmental hazards near your current location.
-                  </p>
-                </div>
+            <h4 className="text-lg font-medium text-gray-900 mb-3">Notification Range</h4>
+            <div className="space-y-2">
+              <p className="text-sm text-gray-600">
+                Choose how far from a danger zone you want to receive alerts:
+              </p>
+              <div className="flex items-center space-x-2">
+                <input
+                  type="range"
+                  min="1"
+                  max="5"
+                  step="1"
+                  value={notificationRange}
+                  onChange={handleRangeChange}
+                  className="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                />
               </div>
-            ) : locationPermission === 'denied' ? (
-              <div className="flex items-start space-x-3 bg-yellow-50 border border-yellow-100 rounded-lg p-4">
-                <AlertTriangle className="h-6 w-6 text-yellow-500 mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="font-medium text-yellow-800">Location access blocked</p>
-                  <p className="text-yellow-700 text-sm mt-1">
-                    Without location access, we can&apos;t send you alerts about hazards near you.
-                  </p>
-                  <div className="mt-3">
-                    <a
-                      href="#"
-                      onClick={() => window.open('chrome://settings/content/location')}
-                      className="text-yellow-600 text-sm font-medium underline hover:text-yellow-800"
-                    >
-                      Update location settings
-                    </a>
-                  </div>
-                </div>
+              <div className="flex justify-between text-xs text-gray-500">
+                <span>1km</span>
+                <span>2km</span>
+                <span>3km</span>
+                <span>4km</span>
+                <span>5km</span>
               </div>
-            ) : (
-              <div className="flex items-start space-x-4">
-                <div className="mt-1 bg-green-100 p-2 rounded-full flex-shrink-0">
-                  <MapPin className="h-5 w-5 text-green-600" />
-                </div>
-                <div>
-                  <p className="font-medium text-gray-900">Enable location access</p>
-                  <p className="text-gray-600 text-sm mt-1">
-                    This allows us to send you alerts about environmental hazards based on your current location.
-                  </p>
-                  <button
-                    onClick={requestLocationPermission}
-                    className="mt-3 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium transition shadow-sm"
-                  >
-                    <span className="flex items-center">
-                      <MapPin className="h-4 w-4 mr-1.5" />
-                      Enable Location Access
-                    </span>
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Advanced Settings */}
-          <div>
-            <button
-              onClick={() => setShowAdvancedOptions(!showAdvancedOptions)}
-              className="flex items-center text-gray-700 font-medium hover:text-gray-900"
-            >
-              <Settings className="h-4 w-4 mr-1.5" />
-              {showAdvancedOptions ? 'Hide advanced settings' : 'Show advanced settings'}
-            </button>
-
-            {showAdvancedOptions && (
-              <div className="mt-4 bg-gray-50 rounded-lg p-4 border border-gray-200">
-                <h5 className="font-medium text-gray-800 mb-3">Notification Range</h5>
-
-                <div className="space-y-2">
-                  <p className="text-sm text-gray-600">
-                    Choose how far from a danger zone you want to receive alerts:
-                  </p>
-
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="range"
-                      min="1"
-                      max="5"
-                      step="1"
-                      value={notificationRange}
-                      onChange={handleRangeChange}
-                      className="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                    />
-                  </div>
-
-                  <div className="flex justify-between text-xs text-gray-500">
-                    <span>1km</span>
-                    <span>2km</span>
-                    <span>3km</span>
-                    <span>4km</span>
-                    <span>5km</span>
-                  </div>
-
-                  <p className="text-sm font-medium text-gray-700 mt-2">
-                    Current setting: Notify me when I&apos;m within {notificationRange}km of a danger zone border
-                  </p>
-                </div>
-
-                <div className="mt-4 bg-blue-50 rounded-md p-3 flex items-start">
-                  <Info className="h-5 w-5 text-blue-500 mt-0.5 mr-2 flex-shrink-0" />
-                  <p className="text-sm text-blue-700">
-                    More advanced settings like notification frequency and alert types will be available in a future update.
-                  </p>
-                </div>
-              </div>
-            )}
+              <p className="text-sm font-medium text-gray-700 mt-2">
+                Current setting: Notify me when I&apos;m within {notificationRange}km of a danger zone border
+              </p>
+            </div>
           </div>
         </div>
       </div>
