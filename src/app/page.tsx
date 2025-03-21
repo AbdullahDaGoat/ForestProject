@@ -88,7 +88,7 @@ export default function Home() {
         <div className="container mx-auto px-4 py-3 flex justify-between items-center">
           <div className="flex items-center">
             <AlertTriangle className="text-red-600 dark:text-red-500 mr-2" size={24} />
-            <h1 className="text-xl font-bold text-gray-900 dark:text-white">Environmental Monitoring Dashboard</h1>
+            <h1 className="text-xl font-bold text-gray-900 dark:text-white">Wildfire Watch Dashboard</h1>
           </div>
           
           <div className="hidden md:flex items-center space-x-4">

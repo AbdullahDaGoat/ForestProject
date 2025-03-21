@@ -543,13 +543,15 @@
 
 // public/sw.js
 self.addEventListener('install', () => {
-  console.log('[SW] Installed');
-  self.skipWaiting();
-});
-
-self.addEventListener('activate', (event) => {
-  console.log('[SW] Activated');
-  event.waitUntil(self.clients.claim());
-});
-
-self.addEventListener('fetch', () => {});
+    console.log('[SW] Install event.');
+    self.skipWaiting();
+  });
+  
+  self.addEventListener('activate', () => {
+    console.log('[SW] Activate event.');
+    event.waitUntil(self.clients.claim());
+  });
+  
+  self.addEventListener('fetch', () => {});
+  
+  
