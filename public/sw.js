@@ -547,7 +547,7 @@ self.addEventListener('install', () => {
     self.skipWaiting();
   });
   
-  self.addEventListener('activate', () => {
+  self.addEventListener('activate', (event) => {
     console.log('[SW] Activate event.');
     event.waitUntil(self.clients.claim());
   });

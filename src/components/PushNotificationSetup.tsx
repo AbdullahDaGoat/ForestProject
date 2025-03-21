@@ -207,7 +207,7 @@ export default function PushNotificationSetup() {
   
       // Step 7: Send a test notification
       console.log("[subscribeToPush] Sending test notification...");
-      const testResponse = await fetch(`${BACKEND_URL}/send-test-notification`, {
+      const testResponse = await fetch(`${BACKEND_URL}/trigger-notification`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ endpoint: subscription.endpoint })
