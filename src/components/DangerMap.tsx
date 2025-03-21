@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useEffect, useState, useMemo, useRef } from 'react';
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { calculateDistance, formatDangerLevel } from '@/lib/utils';
 import {
@@ -65,6 +65,9 @@ export default function DangerMap() {
   const reconnectAttemptsRef = useRef<number>(0);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [usePolling, setUsePolling] = useState(false);
+  
+  // Define backend URL
+  const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:4000';
 
   const dangerLevelColorMap: Record<string, string> = {
     low: "bg-green-500",
@@ -74,29 +77,29 @@ export default function DangerMap() {
     "no risk": "bg-blue-500" // or whatever color you prefer
   };
 
-  // Function to fetch danger zones data
-  const fetchDangerZonesData = async () => {
-    try {
-      const response = await fetch('/inputData');
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
-      }
-      const data = await response.json();
-      if (data.dangerZones) {
-        // Ensure each zone has a unique id
-        const zonesWithIds = data.dangerZones.map((zone: any, index: number) => ({
-          ...zone,
-          id: zone.id || `zone-${index}-${Date.now()}`
-        }));
-        setDangerZones(zonesWithIds);
-        setLastUpdated(new Date());
-        setLoading(false);
-      }
-    } catch (err) {
-      console.error('Failed to fetch danger zones data:', err);
-      setError('Failed to load data. Please check your connection and try again.');
+
+const fetchDangerZonesData = useCallback(async () => {
+  try {
+    const response = await fetch(`${BACKEND_URL}/inputData`);
+    if (!response.ok) {
+      throw new Error(`HTTP error! Status: ${response.status}`);
     }
-  };
+    const data = await response.json();
+    if (data.dangerZones) {
+      // Ensure each zone has a unique id
+      const zonesWithIds = data.dangerZones.map((zone: any, index: number) => ({
+        ...zone,
+        id: zone.id || `zone-${index}-${Date.now()}`
+      }));
+      setDangerZones(zonesWithIds);
+      setLastUpdated(new Date());
+      setLoading(false);
+    }
+  } catch (err) {
+    console.error('Failed to fetch danger zones data:', err);
+    setError('Failed to load data. Please check your connection and try again.');
+  }
+}, [setDangerZones, setLastUpdated, setLoading, setError, BACKEND_URL]);
 
   // Set up data fetching mechanism (SSE or polling)
   useEffect(() => {
@@ -106,7 +109,7 @@ export default function DangerMap() {
           eventSourceRef.current.close();
         }
         
-        const eventSource = new EventSource('/inputData?subscribe=true');
+        const eventSource = new EventSource(`${BACKEND_URL}/inputData?subscribe=true`);
         eventSourceRef.current = eventSource;
         
         eventSource.onopen = () => {
@@ -210,7 +213,7 @@ export default function DangerMap() {
         navigator.geolocation.clearWatch(watchId);
       }
     };
-  }, [usePolling]);
+  }, [usePolling, BACKEND_URL, fetchDangerZonesData]); // Add BACKEND_URL as dependency
 
   // Calculate nearest danger zone and display notifications
   useEffect(() => {

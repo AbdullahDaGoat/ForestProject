@@ -1,9 +1,12 @@
 // Service Worker for PWA functionality
 
+// Configure backend URL - change this when deploying
+const BACKEND_URL = 'http://localhost:4000';
 const CACHE_NAME = 'env-monitor-v1';
+
+// Frontend assets to cache
 const urlsToCache = [
   '/',
-  '/inputData',
   '/manifest.json',
   '/pushService.js',
   '/icons/icon-72x72.png',
@@ -13,7 +16,24 @@ const urlsToCache = [
   '/icons/icon-152x152.png',
   '/icons/icon-192x192.png',
   '/icons/icon-512x512.png'
+  // Note: Removed '/inputData' since it's now part of the backend
 ];
+
+// Helper function to determine if a request should be routed to the backend
+function isBackendRequest(url) {
+  const paths = ['/inputData', '/dangerZones'];
+  const urlPath = new URL(url).pathname;
+  return paths.some(path => urlPath.startsWith(path));
+}
+
+// Helper to rewrite URLs to the backend when needed
+function rewriteUrlIfNeeded(url) {
+  if (isBackendRequest(url)) {
+    const urlObj = new URL(url);
+    return `${BACKEND_URL}${urlObj.pathname}${urlObj.search}`;
+  }
+  return url;
+}
 
 // Install event - cache assets and activate new SW immediately
 self.addEventListener('install', (event) => {
@@ -43,8 +63,48 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch event - serve from cache first, then fallback to network
+// Fetch event - handle routing to backend when needed
 self.addEventListener('fetch', (event) => {
+  const url = event.request.url;
+  
+  // If this is a backend request, rewrite the URL
+  if (isBackendRequest(url)) {
+    const backendUrl = rewriteUrlIfNeeded(url);
+    
+    event.respondWith(
+      fetch(backendUrl, {
+        method: event.request.method,
+        headers: event.request.headers,
+        body: event.request.method !== 'GET' ? event.request.clone().body : undefined,
+        mode: 'cors',
+        credentials: 'include'
+      }).catch(error => {
+        console.error('Backend fetch failed:', error);
+        // Queue data for sync if it's a POST request
+        if (event.request.method === 'POST' && url.includes('/inputData')) {
+          return event.request.clone().json().then(data => {
+            return queueDataForSync(data).then(() => {
+              return new Response(JSON.stringify({ 
+                success: true, 
+                message: 'Data saved for sync when online'
+              }), {
+                headers: { 'Content-Type': 'application/json' }
+              });
+            });
+          });
+        }
+        return new Response(JSON.stringify({ 
+          error: 'Network error, please try again later' 
+        }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      })
+    );
+    return;
+  }
+  
+  // Standard cache-first strategy for frontend assets
   event.respondWith(
     caches.match(event.request).then((response) => {
       // Return cached response if found
@@ -74,6 +134,27 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
+// Function to queue data for sync
+async function queueDataForSync(data) {
+  try {
+    const db = await openDB('environmentalData', 1, {
+      upgrade(db) {
+        if (!db.objectStoreNames.contains('outbox')) {
+          db.createObjectStore('outbox', { keyPath: 'id', autoIncrement: true });
+        }
+      }
+    });
+    
+    return db.add('outbox', {
+      ...data,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Failed to queue data for sync:', error);
+    throw error;
+  }
+}
+
 // Background sync for offline data submission
 self.addEventListener('sync', (event) => {
   if (event.tag === 'sync-environmental-data') {
@@ -89,7 +170,7 @@ async function syncEnvironmentalData() {
     
     for (const data of offlineData) {
       try {
-        const response = await fetch('/inputData', {
+        const response = await fetch(`${BACKEND_URL}/inputData`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -182,8 +263,8 @@ async function performEnvironmentalCheck() {
       navigator.geolocation.getCurrentPosition(async (position) => {
         const { latitude, longitude } = position.coords;
         
-        // Fetch current danger zones
-        const response = await fetch('/dangerZones');
+        // Fetch current danger zones from backend
+        const response = await fetch(`${BACKEND_URL}/dangerZones`);
         if (!response.ok) return;
         
         const { dangerZones } = await response.json();
@@ -245,4 +326,25 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 
 function deg2rad(deg) {
   return deg * (Math.PI/180);
+}
+
+// Helper function for IndexedDB operations
+function openDB(name, version, upgradeCallback) {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(name, version);
+    
+    if (upgradeCallback) {
+      request.onupgradeneeded = event => {
+        upgradeCallback(event.target.result);
+      };
+    }
+    
+    request.onsuccess = event => {
+      resolve(event.target.result);
+    };
+    
+    request.onerror = event => {
+      reject(event.target.error);
+    };
+  });
 }

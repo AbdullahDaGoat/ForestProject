@@ -14,6 +14,7 @@ import {
 
 // Paste your public VAPID key here
 const SERVER_PUBLIC_KEY = "BMIlphB5UNplAcbs-4nVB9eHiIyawSQbd65fu8jm52PN4K5D_VYOhbwjcHDoCfXc02zl8xSYB0Rto8_zc6r3Qcs";
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:4000';
 
 export default function PushNotificationSetup() {
   const [permission, setPermission] = useState<NotificationPermission | 'default'>('default');
@@ -93,8 +94,8 @@ export default function PushNotificationSetup() {
       console.log('Push subscription:', JSON.stringify(subscription));
       setPushSubscription(subscription);
 
-      // Send the subscription to your backend API (make sure to create this endpoint)
-      await fetch('/api/save-subscription', {
+      // Send the subscription to your backend API
+      await fetch(`${BACKEND_URL}/save-subscription`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(subscription)
@@ -305,7 +306,7 @@ export default function PushNotificationSetup() {
                 <div>
                   <p className="font-medium text-yellow-800">Location access blocked</p>
                   <p className="text-yellow-700 text-sm mt-1">
-                    Without location access, we can’t send you alerts about hazards near you.
+                    Without location access, we can&apos;t send you alerts about hazards near you.
                   </p>
                   <div className="mt-3">
                     <a 
@@ -382,7 +383,7 @@ export default function PushNotificationSetup() {
                   </div>
                   
                   <p className="text-sm font-medium text-gray-700 mt-2">
-                    Current setting: Notify me when I’m within {notificationRange}km of a danger zone border
+                    Current setting: Notify me when I&apos;m within {notificationRange}km of a danger zone border
                   </p>
                 </div>
                 

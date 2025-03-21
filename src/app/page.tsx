@@ -9,6 +9,9 @@ import { HelpCircle, AlertTriangle, Info, Map, Clock, Menu, X } from 'lucide-rea
 // Import the map component dynamically with no SSR
 const DangerMap = dynamic(() => import('@/components/DangerMap'), { ssr: false });
 
+// Hardcoded backend URL as requested
+const BACKEND_URL = 'http://localhost:4000';
+
 export default function Home() {
   const [stats, setStats] = useState({
     activeFireCount: 0,
@@ -26,7 +29,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState('map');
   const eventSourceRef = useRef<EventSource | null>(null);
   
-  // Setting up SSE for real-time updates
+  // Setting up SSE for real-time updates with backend URL
   useEffect(() => {
     const setupEventSource = () => {
       // Close any existing connection
@@ -34,8 +37,8 @@ export default function Home() {
         eventSourceRef.current.close();
       }
       
-      // Create new SSE connection
-      const eventSource = new EventSource('/inputData?subscribe=true');
+      // Create new SSE connection pointing to backend
+      const eventSource = new EventSource(`${BACKEND_URL}/inputData?subscribe=true`);
       eventSourceRef.current = eventSource;
       
       eventSource.onmessage = (event) => {
@@ -95,8 +98,9 @@ export default function Home() {
               Last updated: {mounted ? (stats.lastUpdate || 'Loading...') : 'Loading...'}
             </span>
             <Link
-              href="/inputData"
+              href={`${BACKEND_URL}/inputData`}
               className="bg-blue-600 hover:bg-blue-700 text-white text-sm py-1.5 px-3 rounded-md transition"
+              target="_blank"
             >
               View Raw Data
             </Link>
@@ -155,8 +159,9 @@ export default function Home() {
                                 
                 <div className="mt-4">
                   <Link
-                    href="/inputData"
+                    href={`${BACKEND_URL}/inputData`}
                     className="block w-full bg-blue-600 hover:bg-blue-700 text-white text-center py-2 px-4 rounded-md transition"
+                    target="_blank"
                   >
                     View Raw Data
                   </Link>

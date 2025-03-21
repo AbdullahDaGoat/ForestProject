@@ -1,13 +1,12 @@
 import './globals.css';
 import type { Metadata } from 'next';
-// Import the client components
 import MediaSessionManager from '../components/MediaSessionManager.client';
 import ServiceWorkerManagerClient from '../components/ServiceWorkerManager.client';
 
 export const metadata: Metadata = {
   title: 'Environmental Monitoring Dashboard',
   description: 'Real-time environmental monitoring from drone data',
-  manifest: '/manifest.json',
+  manifest: '/manifest.json'
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
