@@ -21,13 +21,13 @@ const urlsToCache = [
 
 // Helper function to determine if a request should be routed to the backend
 function isBackendRequest(url) {
-  const paths = ['/inputData']; // Removed '/dangerZones' as it doesn't exist
-  const urlPath = new URL(url).pathname;
+  const paths = ['/inputData'];
   const urlObj = new URL(url);
+  const urlPath = urlObj.pathname;
   
   // Skip SSE connections - let them pass through directly
   if (urlPath.startsWith('/inputData') && (urlObj.searchParams.has('subscribe') || url.includes('subscribe=true'))) {
-    return false;  // Don't handle SSE connections in the service worker
+    return false;
   }
   
   return paths.some(path => urlPath.startsWith(path));
@@ -44,7 +44,7 @@ function rewriteUrlIfNeeded(url) {
 
 // Install event - cache assets and activate new SW immediately
 self.addEventListener('install', (event) => {
-  self.skipWaiting(); // Force the waiting SW to become active
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       return cache.addAll(urlsToCache);
@@ -65,7 +65,7 @@ self.addEventListener('activate', (event) => {
           })
         );
       }),
-      self.clients.claim() // Take control of uncontrolled clients
+      self.clients.claim()
     ])
   );
 });
@@ -79,7 +79,6 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   
-  // If this is a backend request, rewrite the URL
   if (isBackendRequest(url)) {
     const backendUrl = rewriteUrlIfNeeded(url);
     
@@ -89,10 +88,10 @@ self.addEventListener('fetch', (event) => {
         headers: event.request.headers,
         body: event.request.method !== 'GET' ? event.request.clone().body : undefined,
         mode: 'cors',
-        credentials: 'same-origin' // Changed from 'include' to 'same-origin' for better compatibility
+        credentials: 'same-origin'
       }).catch(error => {
         console.error('Backend fetch failed:', error);
-        // Queue data for sync if it's a POST request
+        // If POST and offline, attempt to queue data for background sync
         if (event.request.method === 'POST' && url.includes('/inputData')) {
           return event.request.clone().json().then(data => {
             return queueDataForSync(data).then(() => {
@@ -119,34 +118,24 @@ self.addEventListener('fetch', (event) => {
   // Standard cache-first strategy for frontend assets
   event.respondWith(
     caches.match(event.request).then((response) => {
-      // Return cached response if found
-      if (response) {
-        return response;
-      }
-      // Otherwise, fetch from network
+      if (response) return response;
       return fetch(event.request).then((networkResponse) => {
-        // Validate response before caching
-        if (
-          !networkResponse ||
-          networkResponse.status !== 200 ||
-          networkResponse.type !== 'basic'
-        ) {
+        if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
           return networkResponse;
         }
-        // Clone response so one copy can be cached
         const responseToCache = networkResponse.clone();
         caches.open(CACHE_NAME).then((cache) => {
           cache.put(event.request, responseToCache);
         });
         return networkResponse;
       }).catch(() => {
-        // Optionally, return a fallback page for offline situations
+        // Optionally, return a fallback response if desired
       });
     })
   );
 });
 
-// Function to queue data for sync
+// Function to queue data for sync using IndexedDB
 async function queueDataForSync(data) {
   try {
     const db = await openDB('environmentalData', 1, {
@@ -174,7 +163,6 @@ self.addEventListener('sync', (event) => {
   }
 });
 
-// Function to sync queued data
 async function syncEnvironmentalData() {
   try {
     const db = await openDB('environmentalData', 1);
@@ -189,7 +177,6 @@ async function syncEnvironmentalData() {
           },
           body: JSON.stringify(data),
         });
-        
         if (response.ok) {
           await db.delete('outbox', data.id);
         }
@@ -210,32 +197,24 @@ self.addEventListener('push', (event) => {
     icon: '/icons/icon-192x192.png',
     badge: '/icons/icon-72x72.png',
     tag: 'environmental-alert',
-    data: {
-      url: '/'
-    }
+    data: { url: '/' }
   };
 
-  // Try to parse the push data if available
   if (event.data) {
     try {
       const data = event.data.json();
-      notificationData = {
-        ...notificationData,
-        ...data
-      };
+      notificationData = { ...notificationData, ...data };
     } catch (e) {
       console.error('Error parsing push notification data:', e);
     }
   }
 
-  // Set vibration pattern based on danger level
   if (notificationData.dangerLevel === 'extreme' || notificationData.dangerLevel === 'high') {
     notificationData.vibrate = [100, 50, 100, 50, 100, 50, 200];
   } else if (notificationData.dangerLevel === 'medium') {
     notificationData.vibrate = [100, 50, 100];
   }
 
-  // Show notification
   event.waitUntil(
     self.registration.showNotification(notificationData.title, notificationData)
   );
@@ -244,8 +223,6 @@ self.addEventListener('push', (event) => {
 // Notification click event handler
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-
-  // This looks to see if the current is already open and focuses it
   event.waitUntil(
     clients.matchAll({ type: 'window' }).then((clientList) => {
       for (const client of clientList) {
@@ -260,29 +237,22 @@ self.addEventListener('notificationclick', (event) => {
   );
 });
 
-// Periodic background sync for regular environmental checks
+// Periodic background sync for environmental checks
 self.addEventListener('periodicsync', (event) => {
   if (event.tag === 'environmental-check') {
     event.waitUntil(performEnvironmentalCheck());
   }
 });
 
-// Function to perform a background check of user's location against danger zones
 async function performEnvironmentalCheck() {
   if ('geolocation' in self) {
     try {
-      // Get user's current position
       navigator.geolocation.getCurrentPosition(async (position) => {
         const { latitude, longitude } = position.coords;
-        
-        // Fetch current danger zones from inputData endpoint instead of dangerZones
         const response = await fetch(`${BACKEND_URL}/inputData`);
         if (!response.ok) return;
-        
         const data = await response.json();
-        const dangerZones = data.dangerZones || []; // Extract danger zones from the response
-        
-        // Check if user is near any danger zone
+        const dangerZones = data.dangerZones || [];
         for (const zone of dangerZones) {
           const distance = calculateDistance(
             latitude, 
@@ -290,30 +260,21 @@ async function performEnvironmentalCheck() {
             zone.location.lat, 
             zone.location.lng
           );
-          
-          // If within 2km of a 5km danger zone, show notification
           if (distance < 7) {
             const notificationTitle = distance < 5 
               ? '⚠️ You are in a danger zone!' 
               : '⚡ You are approaching a danger zone';
-              
             const notificationBody = distance < 5
               ? `You are currently inside a ${zone.dangerLevel} risk area. Take necessary precautions.`
               : `You are ${Math.round(distance - 5)}km from a ${zone.dangerLevel} risk area. Be alert.`;
-              
             await self.registration.showNotification(notificationTitle, {
               body: notificationBody,
               icon: '/icons/icon-192x192.png',
               badge: '/icons/icon-72x72.png',
               tag: 'proximity-alert',
-              data: {
-                url: '/',
-                zoneId: zone.id
-              },
+              data: { url: '/', zoneId: zone.id },
               vibrate: distance < 5 ? [100, 50, 100, 50, 200] : [100, 50, 100]
             });
-            
-            // Only notify about the closest danger zone
             break;
           }
         }
@@ -324,40 +285,30 @@ async function performEnvironmentalCheck() {
   }
 }
 
-// Haversine formula to calculate distance between two points
 function calculateDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371; // Radius of the earth in km
+  const R = 6371;
   const dLat = deg2rad(lat2 - lat1);
   const dLon = deg2rad(lon2 - lon1);
-  const a = 
-    Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * 
-    Math.sin(dLon/2) * Math.sin(dLon/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); 
-  return R * c; // Distance in km
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 }
 
 function deg2rad(deg) {
-  return deg * (Math.PI/180);
+  return deg * (Math.PI / 180);
 }
 
-// Helper function for IndexedDB operations
 function openDB(name, version, upgradeCallback) {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(name, version);
-    
     if (upgradeCallback) {
       request.onupgradeneeded = event => {
         upgradeCallback(event.target.result);
       };
     }
-    
-    request.onsuccess = event => {
-      resolve(event.target.result);
-    };
-    
-    request.onerror = event => {
-      reject(event.target.error);
-    };
+    request.onsuccess = event => resolve(event.target.result);
+    request.onerror = event => reject(event.target.error);
   });
 }

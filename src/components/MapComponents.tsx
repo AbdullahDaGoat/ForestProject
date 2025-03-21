@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { 
   MapContainer, 
   TileLayer, 
@@ -93,13 +93,31 @@ function MapController({
   onMapReady: () => void;
 }) {
   const map = useMap();
+  const [hasUserInteracted, setHasUserInteracted] = useState(false);
+
   useEffect(() => {
     if (!map) return;
-    map.setView(mapCenter, map.getZoom());
+
+    // Listen for the first drag event to mark that the user has interacted
+    const handleDragStart = () => {
+      setHasUserInteracted(true);
+    };
+    map.on('dragstart', handleDragStart);
+
+    // Only set the view if the user hasn't interacted yet
+    if (!hasUserInteracted) {
+      map.setView(mapCenter, map.getZoom());
+    }
     onMapReady();
-  }, [map, mapCenter, onMapReady]);
+
+    return () => {
+      map.off('dragstart', handleDragStart);
+    };
+  }, [map, mapCenter, onMapReady, hasUserInteracted]);
+
   return null;
 }
+
 
 // Custom zoom control using react-leaflet's useMap hook
 const CustomZoomControl = () => {
