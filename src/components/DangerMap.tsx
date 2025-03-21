@@ -3,19 +3,12 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { calculateDistance, formatDangerLevel } from '@/lib/utils';
-import {
-  AlertTriangle,
-  Navigation,
-  Info,
-  MapPin,
-  Clock
-} from 'lucide-react';
-// Import notification helpers so they're in scope
+import { AlertTriangle, Navigation, Info, MapPin, Clock } from 'lucide-react';
 import { canNotify, showNotification } from '@/lib/notifications';
 
 const MapComponents = dynamic(
   () => import('@/components/MapComponents'),
-  { 
+  {
     loading: () => <MapLoading />,
     ssr: false
   }
@@ -65,12 +58,11 @@ export default function DangerMap() {
   const reconnectAttemptsRef = useRef<number>(0);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [usePolling, setUsePolling] = useState(false);
-  // Throttle notifications to once every 10 seconds
-  const [lastNotificationTime, setLastNotificationTime] = useState<number>(0);
+  // New state: cooldown flag to prevent repeated notifications
+  const [notificationCooldown, setNotificationCooldown] = useState(false);
 
-  // Define backend URL
+  // Backend URL for fetching danger zones data
   const BACKEND_URL = 'https://forestproject-backend-production.up.railway.app';
-
   const dangerLevelColorMap: Record<string, string> = {
     low: "bg-green-500",
     medium: "bg-yellow-500",
@@ -102,7 +94,7 @@ export default function DangerMap() {
     }
   }, [BACKEND_URL]);
 
-  // Set up data fetching mechanism (SSE or polling)
+  // Set up SSE (with polling fallback)
   useEffect(() => {
     const setupEventSource = () => {
       try {
@@ -116,7 +108,6 @@ export default function DangerMap() {
           console.log('SSE connection established');
           reconnectAttemptsRef.current = 0;
           setUsePolling(false);
-          // Initial data fetch to avoid waiting for the first SSE message
           fetchDangerZonesData();
         };
 
@@ -173,7 +164,7 @@ export default function DangerMap() {
       setupPolling();
     }
 
-    // Watch user location
+    // Get user location continuously
     let watchId: number | null = null;
     if ('geolocation' in navigator) {
       watchId = navigator.geolocation.watchPosition(
@@ -202,9 +193,9 @@ export default function DangerMap() {
     };
   }, [usePolling, BACKEND_URL, fetchDangerZonesData]);
 
-  // Calculate nearest danger zone and trigger notifications (throttled)
+  // Calculate nearest danger zone and trigger notifications (with cooldown)
   useEffect(() => {
-    if (userLocation && dangerZones.length > 0) {
+    if (userLocation && dangerZones.length > 0 && !notificationCooldown) {
       let nearest: NearestZone | null = null;
       let minDistance = Infinity;
       dangerZones.forEach((zone: DangerZone) => {
@@ -222,32 +213,31 @@ export default function DangerMap() {
       setNearestDangerZone(nearest);
 
       if (nearest && canNotify()) {
-        const now = Date.now();
-        if (now - lastNotificationTime > 10000) {
-          const typedNearest = nearest as NearestZone;
-          if (typedNearest.distance < 5) {
-            console.log("Triggering danger-zone notification:", typedNearest);
-            showNotification('danger-zone', {
-              title: '⚠️ You are in a danger zone!',
-              body: `You are currently inside a ${typedNearest.zone.dangerLevel} risk area. Take necessary precautions.`,
-              data: { zoneId: typedNearest.zone.id }
-            });
-            setLastNotificationTime(now);
-          } else if (typedNearest.distance < 7 && typedNearest.distance >= 5) {
-            console.log("Triggering approach-zone notification:", typedNearest);
-            showNotification('approach-zone', {
-              title: '⚡ Approaching danger zone',
-              body: `You are ${Math.round(typedNearest.distance - 5)}km from a ${typedNearest.zone.dangerLevel} risk area. Be alert.`,
-              data: { zoneId: typedNearest.zone.id }
-            });
-            setLastNotificationTime(now);
-          }
+        const typedNearest = nearest as NearestZone;
+        if (typedNearest.distance < 5) {
+          console.log("Triggering danger-zone notification:", typedNearest);
+          showNotification('danger-zone', {
+            title: '⚠️ You are in a danger zone!',
+            body: `You are currently inside a ${typedNearest.zone.dangerLevel} risk area. Take necessary precautions.`,
+            data: { zoneId: typedNearest.zone.id }
+          });
+          setNotificationCooldown(true);
+          setTimeout(() => setNotificationCooldown(false), 15000);
+        } else if (typedNearest.distance < 7 && typedNearest.distance >= 5) {
+          console.log("Triggering approach-zone notification:", typedNearest);
+          showNotification('approach-zone', {
+            title: '⚡ Approaching danger zone',
+            body: `You are ${Math.round(typedNearest.distance - 5)}km from a ${typedNearest.zone.dangerLevel} risk area. Be alert.`,
+            data: { zoneId: typedNearest.zone.id }
+          });
+          setNotificationCooldown(true);
+          setTimeout(() => setNotificationCooldown(false), 15000);
         }
       }
     }
-  }, [userLocation, dangerZones, lastNotificationTime]);
+  }, [userLocation, dangerZones, notificationCooldown]);
 
-  // Filter danger zones by selected severity level
+  // Filter danger zones by severity level if one is selected
   const filteredZones = useMemo(() => {
     if (!filterLevel) return dangerZones;
     return dangerZones.filter(zone => zone.dangerLevel === filterLevel);
@@ -272,7 +262,7 @@ export default function DangerMap() {
             <p className="text-red-600">{error}</p>
             <button 
               className="mt-2 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition"
-              onClick={() => window.location.reload()}
+              onClick={handleManualRefresh}
             >
               Retry
             </button>
