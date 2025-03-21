@@ -20,13 +20,43 @@ export default function PushNotificationSetup() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notificationRange, setNotificationRange] = useState<number>(2);
+  // Add a status state to better track the subscription process
+  const [subscriptionStatus, setSubscriptionStatus] = useState<'inactive' | 'pending' | 'active' | 'failed'>('inactive');
+  
+  // Handle messages from service worker
+  const handleServiceWorkerMessage = (event: MessageEvent) => {
+    console.log('Message from SW:', event.data);
+    
+    if (event.data && event.data.type === 'SUBSCRIPTION_STATE_UPDATE') {
+      // Update UI based on service worker state
+      setLoading(false);
+      if (event.data.state === 'enabled') {
+        setSubscriptionStatus('active');
+      } else if (event.data.state === 'disabled') {
+        setSubscriptionStatus('inactive');
+      } else if (event.data.state === 'error') {
+        setSubscriptionStatus('failed');
+        setError('Service worker reported an error with notifications');
+      }
+    }
+    
+    if (event.data && event.data.type === 'NOTIFICATION_SHOWN') {
+      console.log('Notification shown confirmation received');
+      // Notification was successfully shown, ensure UI is updated
+      setSubscriptionStatus('active');
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const isPushSupported = 'Notification' in window && 'serviceWorker' in navigator && 'PushManager' in window;
-      // If push notifications aren't supported, you might handle that here.
+      
       if (isPushSupported) {
         setPermission(Notification.permission);
+        
+        // Listen for messages from service worker
+        navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage);
         
         // Make sure SW is registered and ready before checking for subscription
         const checkSubscription = async () => {
@@ -36,13 +66,36 @@ export default function PushNotificationSetup() {
             if (subscription) {
               console.log("Existing subscription found:", subscription);
               setPushSubscription(subscription);
+              setSubscriptionStatus('active');
+              
+              // Verify the subscription with the backend
+              try {
+                const response = await fetch(`${BACKEND_URL}/verify-subscription`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ endpoint: subscription.endpoint })
+                });
+                
+                if (!response.ok) {
+                  console.warn('Subscription verification failed, may need to resubscribe');
+                }
+              } catch (verifyErr) {
+                console.warn('Failed to verify subscription with backend:', verifyErr);
+              }
+            } else {
+              setSubscriptionStatus('inactive');
             }
           } catch (err) {
             console.error("Error checking for existing subscription:", err);
+            setSubscriptionStatus('failed');
           }
         };
         
         checkSubscription();
+        
+        return () => {
+          navigator.serviceWorker.removeEventListener('message', handleServiceWorkerMessage);
+        };
       }
     }
     
@@ -67,19 +120,22 @@ export default function PushNotificationSetup() {
     return outputArray;
   }
 
-  // Subscribe the user to push notifications.
+  // Subscribe the user to push notifications with improved error handling and mobile support
   const subscribeToPush = async () => {
     setLoading(true);
     setError(null);
+    setSubscriptionStatus('pending');
     
     try {
       // First ensure notification permission is granted
       if (Notification.permission !== 'granted') {
+        // On mobile, it's better to request permission as a result of user interaction
         const permissionResult = await Notification.requestPermission();
         setPermission(permissionResult);
         if (permissionResult !== 'granted') {
           setError('Notification permission denied');
           setLoading(false);
+          setSubscriptionStatus('failed');
           return;
         }
       }
@@ -93,12 +149,12 @@ export default function PushNotificationSetup() {
       
       if (!subscription) {
         try {
-          // Create new subscription with error handling
+          // Create new subscription with improved error handling
           console.log("Creating new push subscription...");
           
           const applicationServerKey = urlBase64ToUint8Array(SERVER_PUBLIC_KEY);
           
-          // Mobile browsers sometimes hang on subscribe, so we use Promise.race with a timeout
+          // Mobile browsers sometimes hang on subscribe, so use Promise.race with timeout
           subscription = await Promise.race([
             registration.pushManager.subscribe({
               userVisibleOnly: true,
@@ -109,13 +165,21 @@ export default function PushNotificationSetup() {
             )
           ]);
           
+          if (!subscription) {
+            throw new Error("Subscription creation failed");
+          }
+          
           console.log("New subscription created successfully:", subscription);
           
           // Send subscription to backend
           const response = await fetch(`${BACKEND_URL}/save-subscription`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(subscription)
+            body: JSON.stringify({
+              subscription,
+              userAgent: navigator.userAgent,
+              deviceType: /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop',
+            })
           });
           
           if (!response.ok) {
@@ -123,24 +187,84 @@ export default function PushNotificationSetup() {
           }
           
           console.log("Subscription saved to backend successfully");
+          
+          // Important: Send a message to the service worker about the subscription
+          // This helps deal with the UI getting stuck issue
+          const swController = navigator.serviceWorker.controller;
+          if (swController) {
+            swController.postMessage({
+              type: 'SUBSCRIPTION_SUCCESSFUL',
+              subscription: subscription.endpoint
+            });
+          }
+          
+          // Test notification to verify everything is working
+          await fetch(`${BACKEND_URL}/send-test-notification`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: subscription.endpoint })
+          });
+          
           setPushSubscription(subscription);
+          setSubscriptionStatus('active');
+          
         } catch (subscribeErr: any) {
           console.error("Error in push subscription process:", subscribeErr);
           setError(`Subscription error: ${subscribeErr.message || 'Unknown error'}`);
+          setSubscriptionStatus('failed');
+          
+          // Try to recover by unsubscribing if we got a partial subscription
+          if (subscription) {
+            try {
+              await subscription.unsubscribe();
+            } catch (unsubErr) {
+              console.warn("Cleanup after failed subscription failed:", unsubErr);
+            }
+          }
+          
           setLoading(false);
           return;
         }
       } else {
         console.log("Using existing subscription:", subscription);
         setPushSubscription(subscription);
+        
+        // Ensure the subscription is registered on the server
+        try {
+          const response = await fetch(`${BACKEND_URL}/save-subscription`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              subscription,
+              userAgent: navigator.userAgent,
+              deviceType: /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop',
+            })
+          });
+          
+          if (!response.ok) {
+            throw new Error("Failed to update existing subscription");
+          }
+          
+          // Notify the service worker about the existing subscription
+          const swController = navigator.serviceWorker.controller;
+          if (swController) {
+            swController.postMessage({
+              type: 'SUBSCRIPTION_SUCCESSFUL',
+              subscription: subscription.endpoint
+            });
+          }
+          
+          setSubscriptionStatus('active');
+        } catch (err) {
+          console.warn("Failed to update existing subscription:", err);
+          // Continue anyway as the subscription exists locally
+        }
       }
-      
-      // Double check that state was updated properly
-      console.log("Push subscription process completed successfully");
       
     } catch (err: any) {
       console.error("Push notification setup failed:", err);
       setError(`Setup failed: ${err.message || 'Unknown error'}`);
+      setSubscriptionStatus('failed');
     } finally {
       setLoading(false);
     }
@@ -166,6 +290,7 @@ export default function PushNotificationSetup() {
         // Now unsubscribe locally
         await pushSubscription.unsubscribe();
         setPushSubscription(null);
+        setSubscriptionStatus('inactive');
         
         // Cleanup any background sync registration if supported
         const registration = await navigator.serviceWorker.ready;
@@ -178,6 +303,7 @@ export default function PushNotificationSetup() {
     } catch (err: any) {
       console.error("Failed to unsubscribe:", err);
       setError(`Unsubscribe failed: ${err.message || 'Unknown error'}`);
+      setSubscriptionStatus('failed');
     } finally {
       setLoading(false);
     }
@@ -222,7 +348,7 @@ export default function PushNotificationSetup() {
                   <p className="text-green-700 text-sm mt-1">
                     You&apos;ll receive real-time alerts for environmental hazards.
                   </p>
-                  {pushSubscription ? (
+                  {subscriptionStatus === 'active' ? (
                     <button
                       onClick={unsubscribeFromPush}
                       disabled={loading}
