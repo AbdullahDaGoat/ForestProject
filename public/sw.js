@@ -257,105 +257,44 @@ async function syncEnvironmentalData() {
 }
 
 // PUSH EVENT: Handle incoming push notifications.
-self.addEventListener('push', (event) => {
-  console.log('[SW] Push event received:', event);
-  
-  // Create default notification data
-  let notificationData = {
-    title: 'Environmental Alert',
-    body: 'New environmental alert detected!',
-    icon: '/icons/icon-192x192.png',
-    badge: '/icons/icon-72x72.png',
-    tag: 'environmental-alert',
-    data: { url: '/' },
-    requireInteraction: true  // Keeps notification visible on mobile
-  };
-  
-  // Try to parse the payload
+self.addEventListener('push', event => {
   if (event.data) {
-    try {
-      const data = event.data.json();
-      console.log('[SW] Push payload parsed successfully:', data);
-      notificationData = { ...notificationData, ...data };
-    } catch (e) {
-      console.error('[SW] Error parsing push notification data:', e);
-    }
+    const data = event.data.json();
+    
+    const options = {
+      body: data.body,
+      icon: data.icon,
+      badge: data.badge,
+      image: data.image,          // large banner image
+      vibrate: data.vibrate,
+      actions: data.actions,
+      tag: data.tag,
+      requireInteraction: data.requireInteraction,
+      timestamp: data.timestamp,
+      data: data.data,
+      silent: false,
+      color: data.color || '#E53935' // Android accent color
+    };
+
+    event.waitUntil(
+      self.registration.showNotification(data.title, options)
+    );
   }
-  
-  // Set vibration patterns based on danger level
-  if (notificationData.dangerLevel === 'extreme' || notificationData.dangerLevel === 'high') {
-    notificationData.vibrate = [100, 50, 100, 50, 100, 50, 200];
-  } else if (notificationData.dangerLevel === 'medium') {
-    notificationData.vibrate = [100, 50, 100];
-  } else {
-    notificationData.vibrate = [100];
-  }
-  
-  // Ensure actions are present for mobile
-  if (!notificationData.actions) {
-    notificationData.actions = [
-      { action: 'view', title: 'View Details' }
-    ];
-  }
-  
-  event.waitUntil(
-    self.registration.pushManager.permissionState({ userVisibleOnly: true })
-      .then(permissionState => {
-        console.log('[SW] Push permission state:', permissionState);
-        if (permissionState === 'granted') {
-          return self.registration.showNotification(notificationData.title, notificationData)
-            .then(() => {
-              console.log('[SW] Notification shown successfully:', notificationData.title);
-              return self.clients.matchAll({ type: 'window' })
-                .then(clients => {
-                  clients.forEach(client => {
-                    client.postMessage({
-                      type: 'NOTIFICATION_SHOWN',
-                      notificationId: notificationData.tag
-                    });
-                  });
-                });
-            })
-            .catch(err => {
-              console.error('[SW] Error showing notification:', err);
-              return self.registration.showNotification('Environmental Alert', {
-                body: 'New alert detected in your area.',
-                icon: '/icons/icon-192x192.png',
-                vibrate: [100]
-              });
-            });
-        } else {
-          console.warn('[SW] Notification permission not granted');
-          return Promise.resolve();
-        }
-      })
-  );
 });
 
-// NOTIFICATION CLICK: Handle user clicks on notifications.
-self.addEventListener('notificationclick', (event) => {
-  console.log('[SW] Notification clicked:', event.notification.tag);
+self.addEventListener('notificationclick', event => {
   event.notification.close();
-  
+  const targetUrl = event.notification.data.url;
+
   if (event.action === 'view') {
-    console.log('[SW] "View" action clicked on notification:', event.notification.tag);
+    event.waitUntil(clients.openWindow(targetUrl));
+  } else if (event.action === 'dismiss') {
+    // Optional: analytics/logging
+  } else {
+    event.waitUntil(clients.openWindow(targetUrl));
   }
-  
-  event.waitUntil(
-    clients.matchAll({ type: 'window' }).then((clientList) => {
-      for (const client of clientList) {
-        if ('url' in client && client.url === (event.notification.data?.url || '/') && 'focus' in client) {
-          console.log('[SW] Focusing existing client for URL:', client.url);
-          return client.focus();
-        }
-      }
-      if (clients.openWindow) {
-        console.log('[SW] Opening new window for URL:', event.notification.data?.url || '/');
-        return clients.openWindow(event.notification.data?.url || '/');
-      }
-    })
-  );
 });
+
 
 // PERIODIC SYNC: Send a message to the client requesting location data.
 self.addEventListener('periodicsync', (event) => {
