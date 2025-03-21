@@ -8,10 +8,7 @@ export default function ServiceWorkerManager() {
   const [registration, setRegistration] = useState<ServiceWorkerRegistration | null>(null);
 
   useEffect(() => {
-    if (
-      'serviceWorker' in navigator &&
-      (window.location.protocol === 'https:' || window.location.hostname === 'localhost')
-    ) {
+    if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || window.location.hostname === 'localhost')) {
       window.addEventListener('load', registerServiceWorker);
       return () => window.removeEventListener('load', registerServiceWorker);
     } else {
@@ -21,36 +18,46 @@ export default function ServiceWorkerManager() {
 
   const registerServiceWorker = async () => {
     try {
+      console.log('[SW Manager] Attempting to register SW...');
       const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
-      console.log('[SW Manager] Registered SW:', reg);
+      console.log('[SW Manager] SW registered:', reg);
       setRegistration(reg);
 
-      navigator.serviceWorker.ready.then((readyReg) => {
-        console.log('[SW Manager] SW Ready:', readyReg);
-      });
+      // Explicitly check if Service Worker becomes ready
+      navigator.serviceWorker.ready
+        .then((readyReg) => {
+          console.log('[SW Manager] Service Worker is ready:', readyReg);
+        })
+        .catch((readyErr) => {
+          console.error('[SW Manager] SW failed to become ready:', readyErr);
+        });
 
       reg.addEventListener('updatefound', () => {
         const newWorker = reg.installing;
         if (newWorker) {
+          console.log('[SW Manager] New SW found:', newWorker);
           newWorker.addEventListener('statechange', () => {
-            console.log('[SW Manager] New SW state:', newWorker.state);
-            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-              console.log('[SW Manager] New SW installed and waiting to activate.');
-              setUpdateAvailable(true);
-            }
-            if (newWorker.state === 'activated') {
-              console.log('[SW Manager] SW Activated.');
+            console.log('[SW Manager] SW state changed:', newWorker.state);
+            if (newWorker.state === 'installed') {
+              if (navigator.serviceWorker.controller) {
+                console.log('[SW Manager] Update available: waiting to activate.');
+                setUpdateAvailable(true);
+              } else {
+                console.log('[SW Manager] SW installed for the first time.');
+              }
+            } else if (newWorker.state === 'activated') {
+              console.log('[SW Manager] SW activated.');
             }
           });
         }
       });
 
       navigator.serviceWorker.addEventListener('controllerchange', () => {
-        console.log('[SW Manager] Controller changed, reloading...');
+        console.log('[SW Manager] SW controller changed. Reloading page...');
         window.location.reload();
       });
     } catch (error) {
-      console.error('[SW Manager] SW registration failed:', error);
+      console.error('[SW Manager] SW registration error:', error);
     }
   };
 
