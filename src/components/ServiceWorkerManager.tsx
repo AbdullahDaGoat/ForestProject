@@ -16,7 +16,8 @@ export default function ServiceWorkerManager() {
 
   const registerServiceWorker = async () => {
     try {
-      const reg = await navigator.serviceWorker.register('/sw.js');
+      // Cache-busting with timestamp query parameter
+      const reg = await navigator.serviceWorker.register(`/sw-v2.js?ts=${Date.now()}`);
       console.log('Service worker registered successfully', reg);
       setRegistration(reg);
 
