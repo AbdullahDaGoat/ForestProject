@@ -27,15 +27,29 @@ export default function PushNotificationSetup() {
       // If push notifications aren't supported, you might handle that here.
       if (isPushSupported) {
         setPermission(Notification.permission);
-        navigator.serviceWorker.ready.then(registration => {
-          registration.pushManager.getSubscription().then(subscription => {
+        
+        // Make sure SW is registered and ready before checking for subscription
+        const checkSubscription = async () => {
+          try {
+            const registration = await navigator.serviceWorker.ready;
+            const subscription = await registration.pushManager.getSubscription();
             if (subscription) {
               console.log("Existing subscription found:", subscription);
+              setPushSubscription(subscription);
             }
-            setPushSubscription(subscription);
-          });
-        });
+          } catch (err) {
+            console.error("Error checking for existing subscription:", err);
+          }
+        };
+        
+        checkSubscription();
       }
+    }
+    
+    // Load notification range from localStorage
+    const savedRange = localStorage.getItem('notificationRange');
+    if (savedRange) {
+      setNotificationRange(parseInt(savedRange));
     }
   }, []);
 
@@ -54,50 +68,79 @@ export default function PushNotificationSetup() {
   }
 
   // Subscribe the user to push notifications.
-  // A Promise.race with a timeout ensures that if the pushManager.subscribe hangs, it rejects after 10 seconds.
   const subscribeToPush = async () => {
     setLoading(true);
     setError(null);
+    
     try {
-      // Request permission if needed.
+      // First ensure notification permission is granted
       if (Notification.permission !== 'granted') {
         const permissionResult = await Notification.requestPermission();
         setPermission(permissionResult);
         if (permissionResult !== 'granted') {
           setError('Notification permission denied');
+          setLoading(false);
           return;
         }
       }
+      
+      // Make sure service worker is ready
       const registration = await navigator.serviceWorker.ready;
       console.log("Service worker ready:", registration);
+      
+      // Check if we already have a subscription
       let subscription = await registration.pushManager.getSubscription();
+      
       if (!subscription) {
-        subscription = await Promise.race([
-          registration.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: urlBase64ToUint8Array(SERVER_PUBLIC_KEY)
-          }),
-          new Promise<PushSubscription>((_resolve, reject) =>
-            setTimeout(() => reject(new Error("Push subscription timeout")), 10000)
-          )
-        ]);
-        console.log("New subscription created:", subscription);
-        // Send the new subscription to your backend.
-        const res = await fetch(`${BACKEND_URL}/save-subscription`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(subscription)
-        });
-        if (!res.ok) {
-          throw new Error(`Backend subscription save failed with status ${res.status}`);
+        try {
+          // Create new subscription with error handling
+          console.log("Creating new push subscription...");
+          
+          const applicationServerKey = urlBase64ToUint8Array(SERVER_PUBLIC_KEY);
+          
+          // Mobile browsers sometimes hang on subscribe, so we use Promise.race with a timeout
+          subscription = await Promise.race([
+            registration.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey
+            }),
+            new Promise<never>((_, reject) => 
+              setTimeout(() => reject(new Error("Push subscription timed out")), 15000)
+            )
+          ]);
+          
+          console.log("New subscription created successfully:", subscription);
+          
+          // Send subscription to backend
+          const response = await fetch(`${BACKEND_URL}/save-subscription`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(subscription)
+          });
+          
+          if (!response.ok) {
+            throw new Error(`Failed to save subscription to backend: ${response.status}`);
+          }
+          
+          console.log("Subscription saved to backend successfully");
+          setPushSubscription(subscription);
+        } catch (subscribeErr: any) {
+          console.error("Error in push subscription process:", subscribeErr);
+          setError(`Subscription error: ${subscribeErr.message || 'Unknown error'}`);
+          setLoading(false);
+          return;
         }
       } else {
         console.log("Using existing subscription:", subscription);
+        setPushSubscription(subscription);
       }
-      setPushSubscription(subscription);
+      
+      // Double check that state was updated properly
+      console.log("Push subscription process completed successfully");
+      
     } catch (err: any) {
-      console.error("Failed to subscribe to push notifications:", err);
-      setError(err.message || 'Failed to subscribe to push notifications');
+      console.error("Push notification setup failed:", err);
+      setError(`Setup failed: ${err.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
@@ -108,17 +151,33 @@ export default function PushNotificationSetup() {
     setLoading(true);
     try {
       if (pushSubscription) {
+        // First send unsubscribe request to backend so it stops sending notifications
+        try {
+          const endpoint = pushSubscription.endpoint;
+          await fetch(`${BACKEND_URL}/remove-subscription`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint })
+          });
+        } catch (err) {
+          console.warn("Could not notify backend about unsubscribe, continuing anyway:", err);
+        }
+        
+        // Now unsubscribe locally
         await pushSubscription.unsubscribe();
         setPushSubscription(null);
+        
+        // Cleanup any background sync registration if supported
         const registration = await navigator.serviceWorker.ready;
         if ('periodicSync' in registration) {
           await (registration as any).periodicSync.unregister('environmental-check');
         }
-        console.log("Unsubscribed from push notifications.");
+        
+        console.log("Unsubscribed from push notifications successfully");
       }
     } catch (err: any) {
       console.error("Failed to unsubscribe:", err);
-      setError(err.message || 'Failed to unsubscribe');
+      setError(`Unsubscribe failed: ${err.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
@@ -177,7 +236,15 @@ export default function PushNotificationSetup() {
                       disabled={loading}
                       className="mt-3 bg-green-100 text-green-700 px-3 py-1.5 rounded-md text-sm font-medium hover:bg-green-200 transition"
                     >
-                      {loading ? 'Enabling...' : 'Enable push notifications'}
+                      {loading ? (
+                        <span className="flex items-center">
+                          <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-green-700" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          Enabling...
+                        </span>
+                      ) : 'Enable push notifications'}
                     </button>
                   )}
                 </div>
@@ -193,7 +260,11 @@ export default function PushNotificationSetup() {
                   <div className="mt-3">
                     <a
                       href="#"
-                      onClick={() => window.open('chrome://settings/content/notifications')}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        // Different instructions depending on browser/OS
+                        alert("To enable notifications, please check your browser settings and ensure notifications are allowed for this site.");
+                      }}
                       className="text-red-600 text-sm font-medium underline hover:text-red-800"
                     >
                       Learn how to enable notifications
