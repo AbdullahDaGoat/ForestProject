@@ -479,22 +479,20 @@
 // function deg2rad(deg) {
 //   return deg * (Math.PI / 180);
 // }
-
-// sw-v3.js (Emergency Minimal Version)
+// public/sw-v3.js
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 self.addEventListener('install', (event) => {
-    event.waitUntil(Promise.resolve()); // Just using event so it's not "unused"
     self.skipWaiting();
     console.log('[SW] Emergency Installed.');
   });
   
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   self.addEventListener('activate', (event) => {
-    event.waitUntil(Promise.resolve()); // Same trick to keep ESLint happy
     self.clients.claim();
     console.log('[SW] Emergency Activated.');
   });
   
-  
-  self.addEventListener('push', event => {
+  self.addEventListener('push', (event) => {
     let data = {};
     if (event.data) {
       data = event.data.json();
