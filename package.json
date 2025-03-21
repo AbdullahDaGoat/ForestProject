@@ -16,7 +16,7 @@
     "leaflet": "^1.9.4",
     "lucide-react": "^0.476.0",
     "modproject": "file:",
-    "next": "15.1.7",
+    "next": "15.2.3",
     "pwa-asset-generator": "^6.4.0",
     "qs": "^6.14.0",
     "react": "^19.0.0",
